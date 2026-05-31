@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -41,7 +40,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── project imports ──────────────────────────────────────────────────────────
-from src.smarttender.match_engine.engine import evaluate_match
+from src.smarttender.agents.graph import PipelineState, TenderPipeline
 from src.smarttender.schemas.company_profile import (
     CompanyProfile,
     ContractorClassification,
@@ -49,12 +48,7 @@ from src.smarttender.schemas.company_profile import (
     InsuranceCoverage,
 )
 from src.smarttender.schemas.match import MatchReport
-from src.smarttender.schemas.tender import (
-    CriteriaCategory,
-    Operator,
-    TenderAnalysisOutput,
-    TenderCriteriaPredicate,
-)
+from src.smarttender.schemas.tender import TenderAnalysisOutput
 
 console = Console()
 
@@ -112,207 +106,6 @@ def build_test_company() -> CompanyProfile:
             )
         ],
         employees_count=22,
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 2.  MOCK EXTRACTION
-#     Simulates the Criteria Agent output for a typical Israeli HVAC tender.
-#     Runs with zero external dependencies.
-# ══════════════════════════════════════════════════════════════════════════════
-
-def mock_extraction() -> TenderAnalysisOutput:
-    y = date.today().year
-    return TenderAnalysisOutput(
-        tender_id="MUN-TLV-2026-0142",
-        title_he="מכרז לאספקת, התקנת ותחזוקת מערכות מיזוג אוויר — עיריית תל אביב-יפו",
-        publisher_he="עיריית תל אביב-יפו",
-        submission_deadline=f"{y}-07-15T12:00:00+03:00",
-        estimated_budget_ils=6_000_000,
-        raw_summary_he=(
-            "מכרז לאספקה, התקנה ותחזוקה של מערכות מיזוג אוויר במבני העירייה לתקופה של שלוש שנים "
-            "עם אופציה להארכה בשנתיים נוספות. נדרש ניסיון מוכח בפרויקטים דומים לגופים ציבוריים "
-            "וסיווג קבלני מתאים."
-        ),
-        criteria=[
-            # C1 — financial (FAIL: revenues are below 5M in all 3 years)
-            TenderCriteriaPredicate(
-                id="C1",
-                category=CriteriaCategory.FINANCIAL,
-                description_he="מחזור כספי שנתי של לפחות 5,000,000 ₪ בכל אחת מ-3 השנים האחרונות",
-                field="annual_turnover_ils",
-                operator=Operator.GTE,
-                value=5_000_000,
-                mandatory=True,
-                lookback_years=3,
-                aggregation="each_year",
-                page=12,
-                quote_he=(
-                    "על המציע להוכיח מחזור כספי שנתי של לפחות 5,000,000 ₪ "
-                    "בכל אחת משלוש השנים הקלנדריות שקדמו לפרסום המכרז"
-                ),
-                confidence=0.95,
-            ),
-            # C2 — classification (FAIL: company has ב/2, needs ג/3)
-            TenderCriteriaPredicate(
-                id="C2",
-                category=CriteriaCategory.CLASSIFICATION,
-                description_he="סיווג קבלני ענף 170 (מיזוג אוויר), קבוצה ג׳ והיקף כספי 3 לפחות",
-                field="contractor_classification",
-                operator=Operator.SATISFIES_CLASSIFICATION,
-                value={"branch_code": "170", "min_group_letter": "ג", "min_financial_tier": 3},
-                mandatory=True,
-                page=11,
-                quote_he=(
-                    "על המציע להחזיק בסיווג קבלנים בענף 170 (מיזוג אוויר) "
-                    "קבוצה ג׳ היקף כספי 3 לפחות, בתוקף ביום ההגשה"
-                ),
-                confidence=0.97,
-            ),
-            # C3 — experience (FAIL: company has 2 public projects; 3 required)
-            TenderCriteriaPredicate(
-                id="C3",
-                category=CriteriaCategory.EXPERIENCE,
-                description_he="ביצוע לפחות 3 פרויקטים דומים לגופים ציבוריים ב-5 השנים האחרונות",
-                field="similar_public_projects",
-                operator=Operator.COUNT_GTE,
-                value=3,
-                mandatory=True,
-                lookback_years=5,
-                qualifier={"client_type": "public"},
-                page=13,
-                quote_he=(
-                    "על המציע להוכיח ניסיון בביצוע לפחות 3 פרויקטים דומים "
-                    "לרשויות מקומיות או גופים ממשלתיים בחמש השנים שקדמו להגשה"
-                ),
-                confidence=0.90,
-            ),
-            # C4 — certification (PASS: company has ISO 9001)
-            TenderCriteriaPredicate(
-                id="C4",
-                category=CriteriaCategory.CERTIFICATION,
-                description_he="תקן ISO 9001 בתוקף",
-                field="certifications",
-                operator=Operator.CONTAINS,
-                value="ISO 9001",
-                mandatory=True,
-                page=14,
-                quote_he="על המציע להחזיק בתעודת ISO 9001 בתוקף ביום הגשת ההצעה",
-                confidence=0.98,
-            ),
-            # C5 — insurance (FAIL: company has 5M; 10M required)
-            TenderCriteriaPredicate(
-                id="C5",
-                category=CriteriaCategory.INSURANCE,
-                description_he="ביטוח אחריות כלפי צד שלישי בסכום של לפחות 10,000,000 ₪",
-                field="insurance_third_party_liability",
-                operator=Operator.GTE,
-                value=10_000_000,
-                mandatory=True,
-                page=15,
-                quote_he=(
-                    "על המציע להמציא פוליסת ביטוח אחריות כלפי צד שלישי "
-                    "על סך 10,000,000 ₪ לפחות, בתוקף לכל תקופת ההסכם"
-                ),
-                confidence=0.92,
-            ),
-            # C6 — optional certification (FAIL/optional: company missing ISO 45001)
-            TenderCriteriaPredicate(
-                id="C6",
-                category=CriteriaCategory.CERTIFICATION,
-                description_he="תקן ISO 45001 (בטיחות וגהות תעסוקתית) — יתרון",
-                field="certifications",
-                operator=Operator.CONTAINS,
-                value="ISO 45001",
-                mandatory=False,
-                page=16,
-                quote_he="עדיפות תינתן לחברות המחזיקות בתקן ISO 45001 בתוקף",
-                confidence=0.85,
-            ),
-        ],
-        extraction_meta={
-            "source": "mock (PoC demo — no real PDF)",
-            "model": "n/a",
-            "schema_version": "1.0",
-        },
-    )
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 3.  REAL PDF EXTRACTION via Claude + instructor
-# ══════════════════════════════════════════════════════════════════════════════
-
-_EXTRACTION_SYSTEM = """\
-אתה מומחה לניתוח מכרזים ממשלתיים ועירוניים בישראל.
-תפקידך לחלץ את כל תנאי הסף (ותנאים נוספים) ממסמך המכרז ולמלא את הסכמה המובנית במדויק.
-
-כללים:
-• חלץ כל תנאי בנפרד — פיננסי, סיווג קבלני, ניסיון, תעודות, ביטוח.
-• עבור מחזור כספי — קבע lookback_years ו-aggregation (each_year / any_year / cumulative / latest).
-• עבור סיווג קבלני — השתמש באופרטור satisfies_classification עם מילון {branch_code, min_group_letter, min_financial_tier}.
-• עבור ביטוח — השתמש בשם שדה insurance_{type} (למשל insurance_third_party_liability).
-• עבור מניין פרויקטים — השתמש באופרטור count>= עם qualifier {client_type, lookback_years}.
-• ציין מספר עמוד וציטוט מדויק לכל תנאי.
-• mandatory=true עבור תנאי סף שלילי (פסילה), false עבור יתרון בלבד.
-"""
-
-_EXTRACTION_USER = """\
-חלץ את תנאי הסף מהמכרז הבא ומלא את הסכמה המובנית:
-
-{text}
-"""
-
-
-def extract_from_pdf(pdf_path: str) -> TenderAnalysisOutput:
-    try:
-        import fitz  # PyMuPDF
-    except ImportError:
-        console.print("[red]PyMuPDF לא מותקן. הרץ: pip install pymupdf[/red]")
-        return mock_extraction()
-
-    try:
-        import anthropic
-        import instructor
-    except ImportError:
-        console.print("[red]anthropic / instructor לא מותקן. הרץ: pip install anthropic instructor[/red]")
-        return mock_extraction()
-
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        console.print("[yellow]ANTHROPIC_API_KEY לא מוגדר — משתמש ב-mock.[/yellow]")
-        return mock_extraction()
-
-    console.print(f"[cyan]קורא PDF: {pdf_path}[/cyan]")
-    doc = fitz.open(pdf_path)
-    pages: list[str] = []
-    for i, page in enumerate(doc):
-        text = page.get_text("text").strip()
-        if text:
-            pages.append(f"[עמוד {i + 1}]\n{text}")
-    doc.close()
-    full_text = "\n\n".join(pages)
-
-    if not full_text.strip():
-        console.print("[yellow]לא חולץ טקסט (PDF סרוק?) — OCR לא מיושם ב-PoC. משתמש ב-mock.[/yellow]")
-        return mock_extraction()
-
-    console.print(
-        f"[cyan]חולץ {len(full_text):,} תווים מ-{len(pages)} עמודים. שולח ל-Claude...[/cyan]"
-    )
-
-    client = instructor.from_anthropic(anthropic.Anthropic(api_key=api_key))
-
-    return client.messages.create(
-        model="claude-opus-4-8",
-        max_tokens=8_192,
-        system=_EXTRACTION_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": _EXTRACTION_USER.format(text=full_text[:80_000]),
-            }
-        ],
-        response_model=TenderAnalysisOutput,
     )
 
 
@@ -454,25 +247,33 @@ def main() -> None:
     company = build_test_company()
     console.print(f"[green]✓[/green] פרופיל חברה: [bold]{company.company_name}[/bold]")
 
-    # ── Step 2: extract (or mock) criteria ──────────────────────────────────
-    if args.pdf:
-        pdf_path = Path(args.pdf)
-        if not pdf_path.exists():
-            console.print(f"[red]קובץ לא נמצא: {args.pdf}[/red]")
-            sys.exit(1)
-        analysis = extract_from_pdf(str(pdf_path))
-        console.print(f"[green]✓[/green] חולצו {len(analysis.criteria)} קריטריונים מ-PDF")
-    else:
+    if args.pdf and not Path(args.pdf).exists():
+        console.print(f"[red]קובץ לא נמצא: {args.pdf}[/red]")
+        sys.exit(1)
+    if not args.pdf:
         console.print("[yellow]⚡ אין PDF — משתמש ב-mock extraction[/yellow]")
-        analysis = mock_extraction()
-        console.print(f"[green]✓[/green] נטענו {len(analysis.criteria)} קריטריונים (mock)")
+
+    # ── Step 2: run the deterministic pipeline (extract → match) ────────────
+    def status(msg: str) -> None:
+        console.print(f"[dim cyan]·[/dim cyan] {msg}")
+
+    pipeline = TenderPipeline()
+    state = pipeline.node_extract_criteria(
+        PipelineState(company=company, pdf_path=args.pdf),
+        on_status=status,
+    )
+    analysis = state.analysis
+    assert analysis is not None  # node guarantees this on success
+    console.print(f"[green]✓[/green] נטענו {len(analysis.criteria)} קריטריונים")
 
     if args.dump_criteria:
         console.print_json(json.dumps(analysis.model_dump(), ensure_ascii=False, indent=2))
         return
 
     # ── Step 3: run match engine ─────────────────────────────────────────────
-    report = evaluate_match(company, analysis)
+    state = pipeline.node_run_match(state, on_status=status)
+    report = state.report
+    assert report is not None
     console.print("[green]✓[/green] מנוע ההתאמה הושלם")
 
     # ── Step 4: render report ────────────────────────────────────────────────
