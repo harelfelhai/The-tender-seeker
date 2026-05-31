@@ -20,6 +20,28 @@ _GROUP_ORDER: dict[str, int] = {"א": 1, "ב": 2, "ג": 3, "ד": 4, "ה": 5}
 # client_type values considered "public" for experience matching
 _PUBLIC_CLIENT_TYPES = {"public", "municipal", "government"}
 
+# Maps the many ways a client type can be expressed (Hebrew from the LLM,
+# English from the profile) to a canonical category. The Criteria Agent emits
+# whatever wording appears in the tender ("רשות מקומית"), so normalisation here
+# is what lets deterministic matching survive real, multilingual extraction.
+_CLIENT_TYPE_ALIASES: dict[str, str] = {
+    # public (umbrella)
+    "public": "public", "ציבורי": "public", "גוף ציבורי": "public", "גופים ציבוריים": "public",
+    # municipal
+    "municipal": "municipal", "רשות מקומית": "municipal", "רשויות מקומיות": "municipal",
+    "עירייה": "municipal", "מועצה מקומית": "municipal", "מועצה אזורית": "municipal",
+    # government
+    "government": "government", "ממשלתי": "government", "גוף ממשלתי": "government",
+    "גופים ממשלתיים": "government", "משרד ממשלתי": "government", "משרדי ממשלה": "government",
+    # private
+    "private": "private", "פרטי": "private", "גוף פרטי": "private",
+}
+
+
+def _canon_client_type(value: str) -> str:
+    """Normalise a raw client-type label to a canonical category."""
+    return _CLIENT_TYPE_ALIASES.get(value.strip(), value.strip().lower())
+
 
 @dataclass
 class EvalResult:
@@ -195,11 +217,17 @@ def _eval_count_gte(
 
     projects = list(profile.similar_public_projects)
 
+    # client_type may arrive as a string or a list, in Hebrew or English.
     client_filter = qualifier.get("client_type")
+    requested_public = False
     if client_filter:
-        # "public" in the qualifier matches municipal/government/public
-        target_types = _PUBLIC_CLIENT_TYPES if client_filter in _PUBLIC_CLIENT_TYPES else {client_filter}
-        projects = [p for p in projects if p.client_type in target_types]
+        raw = client_filter if isinstance(client_filter, list) else [client_filter]
+        requested = {_canon_client_type(str(v)) for v in raw}
+        # If any requested type is public-sector, accept any public-sector project
+        # (the "ציבורי" umbrella covers municipal + government).
+        requested_public = bool(requested & _PUBLIC_CLIENT_TYPES)
+        allowed = _PUBLIC_CLIENT_TYPES if requested_public else requested
+        projects = [p for p in projects if _canon_client_type(p.client_type) in allowed]
 
     if lookback:
         cutoff = base_year - lookback
@@ -213,7 +241,7 @@ def _eval_count_gte(
     passed = count >= required_count
 
     labels = []
-    if client_filter in _PUBLIC_CLIENT_TYPES:
+    if requested_public:
         labels.append("לגופים ציבוריים")
     if lookback:
         labels.append(f"ב-{lookback} השנים האחרונות")
