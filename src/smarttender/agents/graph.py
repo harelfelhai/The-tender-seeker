@@ -14,8 +14,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from ..match_engine.engine import evaluate_match
+from ..match_engine.relevance import score_relevance
 from ..schemas.company_profile import CompanyProfile
 from ..schemas.match import MatchReport
+from ..schemas.relevance import RelevanceReport
 from ..schemas.tender import TenderAnalysisOutput
 from .criteria_agent import CriteriaAgent, StatusFn, _noop
 
@@ -34,6 +36,8 @@ class PipelineState:
     # produced by nodes
     analysis: Optional[TenderAnalysisOutput] = None
     report: Optional[MatchReport] = None
+    relevance: Optional[RelevanceReport] = None
+    final_score: Optional[float] = None
     log: list[str] = field(default_factory=list)
 
 
@@ -72,11 +76,22 @@ class TenderPipeline:
         if state.analysis is None:
             raise RuntimeError("node_run_match called before criteria were extracted")
         state.report = evaluate_match(state.company, state.analysis)
-        on_status("מנוע ההתאמה הושלם")
+        on_status("מנוע ההתאמה (כשירות) הושלם")
+        return state
+
+    def node_score_relevance(self, state: PipelineState, *, on_status: StatusFn = _noop) -> PipelineState:
+        """Second axis: how interesting the tender is. Gated by eligibility —
+        a tender that fails תנאי סף scores 0 regardless of fit."""
+        if state.analysis is None or state.report is None:
+            raise RuntimeError("node_score_relevance requires extracted criteria and a match report")
+        state.relevance = score_relevance(state.company, state.analysis.tender_profile)
+        state.final_score = 0.0 if not state.report.is_eligible else state.relevance.relevance_score
+        on_status("מנוע הרלוונטיות הושלם")
         return state
 
     # ── driver ───────────────────────────────────────────────────────────────
     def run(self, state: PipelineState, *, on_status: StatusFn = _noop) -> PipelineState:
         state = self.node_extract_criteria(state, on_status=on_status)
         state = self.node_run_match(state, on_status=on_status)
+        state = self.node_score_relevance(state, on_status=on_status)
         return state

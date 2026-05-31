@@ -66,3 +66,30 @@ class CompanyProfile(BaseModel):
     insurances: list[InsuranceCoverage] = Field(default_factory=list)
 
     employees_count: Optional[int] = Field(default=None, ge=0)
+
+    # ── characterization (for RELEVANCE scoring, not eligibility) ────────────
+    # These describe the *nature* of the company so we can score how interesting
+    # a (qualifying) tender is — not whether it qualifies. Each field mirrors a
+    # field extracted from the tender (see TenderProfile) → one relevance factor.
+    operating_regions: list[str] = Field(
+        default_factory=list,
+        description='Regions the company works in, e.g. ["צפון", "מרכז"]',
+    )
+    domains: list[str] = Field(
+        default_factory=list,
+        description='Specialties, e.g. ["מיזוג אוויר", "תשתיות"]',
+    )
+    min_project_value_ils: Optional[float] = Field(
+        default=None, ge=0, description="Smallest comfortable project size"
+    )
+    max_project_value_ils: Optional[float] = Field(
+        default=None, ge=0, description="Largest comfortable project size"
+    )
+    preferred_client_types: list[str] = Field(
+        default_factory=list,
+        description='e.g. ["municipal", "government", "rmi"]',
+    )
+    available_capacity_pct: Optional[float] = Field(
+        default=None, ge=0, le=100,
+        description="How much free capacity to take on new work (0-100)",
+    )

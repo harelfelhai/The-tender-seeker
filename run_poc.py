@@ -107,6 +107,13 @@ def build_test_company() -> CompanyProfile:
             )
         ],
         employees_count=22,
+        # ── characterization (drives the RELEVANCE axis) ────────────────────
+        operating_regions=["מרכז", "שרון"],
+        domains=["מיזוג אוויר", "מערכות קירור"],
+        min_project_value_ils=500_000,
+        max_project_value_ils=3_000_000,
+        preferred_client_types=["municipal", "government"],
+        available_capacity_pct=60,
     )
 
 
@@ -165,6 +172,12 @@ def print_report(report: MatchReport, analysis: TenderAnalysisOutput) -> None:
         f"[red]{report.failed_mandatory}[/red]",
         f"[yellow]{report.failed_optional}[/yellow]",
     )
+    if report.unverifiable_mandatory:
+        stats.add_row(
+            "בדיקה ידנית 🔵",
+            f"[blue]{report.unverifiable_mandatory}[/blue]",
+            "",
+        )
     console.print(stats)
 
     # ── per-criterion breakdown table ────────────────────────────────────────
@@ -183,7 +196,10 @@ def print_report(report: MatchReport, analysis: TenderAnalysisOutput) -> None:
     tbl.add_column("עמ׳", width=4, justify="right")
 
     for r in report.breakdown:
-        if r.passed:
+        if r.unverifiable:
+            status = "🔵"
+            row_style = "blue"
+        elif r.passed:
             status = "✅"
             row_style = ""
         elif r.mandatory:
@@ -194,7 +210,7 @@ def print_report(report: MatchReport, analysis: TenderAnalysisOutput) -> None:
             row_style = "yellow"
 
         finding = r.reason_he
-        if r.gap and not r.passed:
+        if r.gap and not r.passed and not r.unverifiable:
             finding += f"\n[dim italic]פער: {r.gap}[/dim italic]"
 
         tbl.add_row(
@@ -213,8 +229,8 @@ def print_report(report: MatchReport, analysis: TenderAnalysisOutput) -> None:
     border = "green" if report.is_eligible else "red"
     console.print(Panel(report.summary_he, title="[bold]סיכום[/bold]", border_style=border))
 
-    # ── actionable gap list ──────────────────────────────────────────────────
-    failures = [r for r in report.breakdown if not r.passed and r.mandatory]
+    # ── actionable gap list (verifiable failures only) ──────────────────────
+    failures = [r for r in report.breakdown if not r.passed and r.mandatory and not r.unverifiable]
     if failures:
         console.print("\n[bold red]פעולות נדרשות לפני הגשה:[/bold red]")
         for i, r in enumerate(failures, 1):
@@ -222,7 +238,70 @@ def print_report(report: MatchReport, analysis: TenderAnalysisOutput) -> None:
             console.print(f"     [dim]→ {r.reason_he}[/dim]")
             if r.gap:
                 console.print(f"     [dim]פער: {r.gap}[/dim]")
+
+    review = [r for r in report.breakdown if r.unverifiable and r.mandatory]
+    if review:
+        console.print(f"\n[bold blue]🔵 {len(review)} דרישות לבדיקה ידנית[/bold blue] "
+                      "[dim](תיעודיות/נוהליות — לא ניתנות לאימות מול פרופיל החברה):[/dim]")
+        for i, r in enumerate(review[:8], 1):
+            console.print(f"  {i}. {r.description_he[:80]}")
+        if len(review) > 8:
+            console.print(f"  [dim]... ועוד {len(review) - 8}[/dim]")
     console.print()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4a. RELEVANCE + DUAL-AXIS SCORE
+# ══════════════════════════════════════════════════════════════════════════════
+
+def print_relevance(relevance, report: MatchReport, final_score: float, analysis: TenderAnalysisOutput) -> None:
+    console.print()
+    tp = analysis.tender_profile
+
+    # Dual-axis headline: eligibility gate × relevance.
+    gate = "✅ עבר תנאי סף" if report.is_eligible else "❌ נכשל בתנאי סף → ציון 0"
+    gate_style = "green" if report.is_eligible else "red"
+    fs_style = "green" if final_score >= 70 else ("yellow" if final_score >= 40 else "red")
+    console.print(
+        Panel(
+            f"כשירות: [bold {gate_style}]{gate}[/bold {gate_style}]\n"
+            f"רלוונטיות (התאמה לאופי החברה): [bold]{relevance.relevance_score}/100[/bold]\n"
+            f"[dim]פרופיל מכרז: אזור={tp.region or '?'} · תחום={', '.join(tp.domains) or '?'} · "
+            f"היקף={('₪%s' % format(int(tp.estimated_value_ils),',')) if tp.estimated_value_ils else '?'} · "
+            f"מזמין={tp.publisher_type or '?'}[/dim]\n\n"
+            f"ציון סופי: [bold {fs_style}]{final_score} / 100[/bold {fs_style}]",
+            title="[bold magenta]ציון משולב: כשירות × רלוונטיות[/bold magenta]",
+            border_style="magenta",
+            padding=(1, 2),
+        )
+    )
+
+    tbl = Table(box=box.ROUNDED, header_style="bold white on purple4", show_lines=False)
+    tbl.add_column("גורם", min_width=16)
+    tbl.add_column("ציון", width=6, justify="center")
+    tbl.add_column("משקל", width=6, justify="center")
+    tbl.add_column("החברה", min_width=16)
+    tbl.add_column("המכרז", min_width=16)
+    tbl.add_column("הסבר", min_width=30)
+    for f in relevance.factors:
+        if f.is_neutral:
+            sc_style = "dim"
+        elif f.score >= 0.8:
+            sc_style = "green"
+        elif f.score <= 0.3:
+            sc_style = "red"
+        else:
+            sc_style = "yellow"
+        tbl.add_row(
+            f.label_he,
+            f"[{sc_style}]{f.score:.2f}[/{sc_style}]",
+            f"{f.weight:.0%}",
+            f.company_value,
+            f.tender_value,
+            f.explanation_he,
+        )
+    console.print(tbl)
+    console.print(f"[dim]{relevance.summary_he}[/dim]\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -376,14 +455,16 @@ def main() -> None:
             sent_window = 80_000 if args.single else 10**12
             print_verification(verify_extraction(args.pdf, analysis, max_chars_sent=sent_window))
 
-    # ── Step 3: run match engine ─────────────────────────────────────────────
+    # ── Step 3: eligibility (match) then relevance, gated by eligibility ─────
     state = pipeline.node_run_match(state, on_status=status)
+    state = pipeline.node_score_relevance(state, on_status=status)
     report = state.report
-    assert report is not None
-    console.print("[green]✓[/green] מנוע ההתאמה הושלם")
+    assert report is not None and state.relevance is not None and state.final_score is not None
+    console.print("[green]✓[/green] כשירות + רלוונטיות חושבו")
 
-    # ── Step 4: render report ────────────────────────────────────────────────
+    # ── Step 4: render reports ───────────────────────────────────────────────
     print_report(report, analysis)
+    print_relevance(state.relevance, report, state.final_score, analysis)
 
 
 if __name__ == "__main__":

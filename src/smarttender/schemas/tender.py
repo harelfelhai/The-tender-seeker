@@ -77,6 +77,33 @@ class TenderCriteriaPredicate(BaseModel):
     needs_review: bool = False
 
 
+class TenderProfile(BaseModel):
+    """Characterization of the tender for RELEVANCE scoring (not eligibility).
+
+    Each field mirrors a CompanyProfile characterization field so the
+    RelevanceEngine can compare them. Extracted in the same pass as criteria.
+    """
+
+    region: Optional[str] = Field(
+        default=None, description='Canonical region: צפון/מרכז/דרום/ירושלים/שרון/שפלה'
+    )
+    location_text: Optional[str] = Field(
+        default=None, description="Raw location as written (city/area)"
+    )
+    domains: list[str] = Field(
+        default_factory=list, description='Subject domains, e.g. ["מיזוג אוויר"]'
+    )
+    estimated_value_ils: Optional[float] = Field(
+        default=None, description="Estimated tender/contract value if stated"
+    )
+    publisher_type: Optional[str] = Field(
+        default=None, description="municipal/government/rmi/other"
+    )
+    work_type: Optional[str] = Field(
+        default=None, description='e.g. "אספקה", "ביצוע", "חכירת קרקע", "שירות"'
+    )
+
+
 class TenderAnalysisOutput(BaseModel):
     """Complete structured output produced by the Criteria Agent."""
 
@@ -87,6 +114,7 @@ class TenderAnalysisOutput(BaseModel):
     estimated_budget_ils: Optional[float] = None
 
     criteria: list[TenderCriteriaPredicate]
+    tender_profile: TenderProfile = Field(default_factory=TenderProfile)
 
     raw_summary_he: str = Field(description="One-paragraph Hebrew summary of the tender")
     extraction_meta: dict[str, Any] = Field(default_factory=dict)

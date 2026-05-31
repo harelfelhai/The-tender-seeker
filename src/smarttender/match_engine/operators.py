@@ -50,6 +50,10 @@ class EvalResult:
     company_value_str: str
     required_value_str: str
     gap: Optional[str] = None
+    # True when the engine cannot deterministically decide (documentary/procedural
+    # requirement, unmodeled field, or non-comparable value). Such criteria are
+    # surfaced for MANUAL REVIEW and do NOT disqualify the company.
+    unverifiable: bool = False
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -156,7 +160,10 @@ def _eval_classification(
     """Validate contractor classification (סיווג קבלני) against the requirement."""
     req = predicate.value
     if not isinstance(req, dict):
-        return EvalResult(False, "ערך סיווג קבלני לא תקין", "–", str(req))
+        return EvalResult(
+            False, "מבנה דרישת הסיווג אינו תקני — בדיקה ידנית", "–", str(req),
+            unverifiable=True,
+        )
 
     req_branch = str(req.get("branch_code", ""))
     req_group = req.get("min_group_letter")
@@ -213,7 +220,10 @@ def _eval_count_gte(
     base_year = _current_year()
 
     if predicate.field != "similar_public_projects":
-        return EvalResult(False, f"שדה לא נתמך עבור count>=: {predicate.field}", "–", str(required_count))
+        return EvalResult(
+            False, f"מניין '{predicate.field}' אינו נתמך — בדיקה ידנית", "–",
+            str(required_count), unverifiable=True,
+        )
 
     projects = list(profile.similar_public_projects)
 
@@ -280,7 +290,12 @@ def _eval_contains(
             f"נדרש קבלת אישור {required_val}",
         )
 
-    field_val = getattr(profile, predicate.field, None)
+    if not hasattr(profile, predicate.field):
+        return EvalResult(
+            False, f"שדה '{predicate.field}' אינו מנוהל בפרופיל — בדיקה ידנית", "–",
+            required_val, unverifiable=True,
+        )
+    field_val = getattr(profile, predicate.field)
     if field_val is None:
         return EvalResult(False, f"שדה {predicate.field} לא קיים בפרופיל", "–", required_val)
     items = [str(v) for v in field_val] if isinstance(field_val, list) else [str(field_val)]
@@ -337,11 +352,32 @@ def _eval_numeric(
     predicate: TenderCriteriaPredicate, profile: CompanyProfile
 ) -> EvalResult:
     """Direct numeric comparison on a scalar profile attribute."""
-    required = float(predicate.value)
-    field_val = getattr(profile, predicate.field, None)
+    # Non-numeric value → this isn't really a numeric threshold (often a
+    # documentary/identity requirement). Flag for manual review, don't crash.
+    try:
+        required = float(predicate.value)
+    except (TypeError, ValueError):
+        return EvalResult(
+            False,
+            f"דרישה שאינה ניתנת לאימות אוטומטי — בדיקה ידנית: {predicate.description_he[:60]}",
+            "—",
+            str(predicate.value),
+            unverifiable=True,
+        )
 
     fmt = _fmt_ils if required >= 1_000 else str
 
+    # Field the profile schema does not model at all → manual review (not a fail).
+    if not hasattr(profile, predicate.field):
+        return EvalResult(
+            False,
+            f"שדה '{predicate.field}' אינו מנוהל בפרופיל החברה — בדיקה ידנית",
+            "—",
+            fmt(required),
+            unverifiable=True,
+        )
+
+    field_val = getattr(profile, predicate.field)
     if field_val is None:
         return EvalResult(
             False,
@@ -374,7 +410,17 @@ def _eval_numeric(
 def _eval_exists(
     predicate: TenderCriteriaPredicate, profile: CompanyProfile
 ) -> EvalResult:
-    val = getattr(profile, predicate.field, None)
+    # Documentary "must submit X" requirements usually map to fields the profile
+    # doesn't model → manual review rather than a fabricated pass/fail.
+    if not hasattr(profile, predicate.field):
+        return EvalResult(
+            False,
+            f"דרישה תיעודית/נוהלית — בדיקה ידנית: {predicate.description_he[:60]}",
+            "—",
+            "נדרש",
+            unverifiable=True,
+        )
+    val = getattr(profile, predicate.field)
     passed = val is not None and val not in ([], {}, "")
     return EvalResult(
         passed,
@@ -412,4 +458,7 @@ def evaluate(predicate: TenderCriteriaPredicate, profile: CompanyProfile) -> Eva
     if op in (Operator.GTE, Operator.LTE, Operator.EQ):
         return _eval_numeric(predicate, profile)
 
-    return EvalResult(False, f"אופרטור לא נתמך: {op.value}", "–", str(predicate.value))
+    return EvalResult(
+        False, f"אופרטור לא נתמך ({op.value}) — בדיקה ידנית", "–", str(predicate.value),
+        unverifiable=True,
+    )

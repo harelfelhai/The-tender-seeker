@@ -20,6 +20,7 @@ from ..schemas.tender import (
     Operator,
     TenderAnalysisOutput,
     TenderCriteriaPredicate,
+    TenderProfile,
 )
 
 # A no-op status sink; callers (e.g. the CLI) can pass their own printer.
@@ -42,6 +43,15 @@ _EXTRACTION_SYSTEM = """\
 • עבור מניין פרויקטים — השתמש באופרטור count>= עם qualifier {client_type, lookback_years}.
 • ציין מספר עמוד וציטוט מדויק לכל תנאי.
 • mandatory=true עבור תנאי סף שלילי (פסילה), false עבור יתרון בלבד.
+
+בנוסף לתנאי הסף, מלא את tender_profile לצורך דירוג רלוונטיות (לא כשירות):
+• region — אזור קנוני: צפון / מרכז / דרום / ירושלים / שרון / שפלה.
+• location_text — המיקום כפי שמופיע (עיר/אזור).
+• domains — תחומי המכרז (למשל ["מיזוג אוויר"], ["בנייה למגורים"], ["תשתיות"]).
+• estimated_value_ils — אומדן/היקף כספי אם צוין.
+• publisher_type — municipal / government / rmi / other.
+• work_type — אספקה / ביצוע / חכירת קרקע / שירות / תחזוקה.
+אם פרט אינו מופיע ב-chunk הנוכחי — השאר null (אל תמציא).
 """
 
 _EXTRACTION_USER = """\
@@ -185,6 +195,7 @@ class CriteriaAgent:
             submission_deadline=meta_src.submission_deadline,
             estimated_budget_ils=meta_src.estimated_budget_ils,
             criteria=kept,
+            tender_profile=self._merge_profiles([o.tender_profile for o in outputs]),
             raw_summary_he=meta_src.raw_summary_he,
             extraction_meta={
                 "source": "full-coverage (map-reduce over all pages)",
@@ -193,6 +204,20 @@ class CriteriaAgent:
                 "schema_version": "1.0",
             },
         )
+
+    @staticmethod
+    def _merge_profiles(profiles: list[TenderProfile]) -> TenderProfile:
+        """Combine per-chunk profiles: first non-empty value per scalar field,
+        union for domains. Profile attributes can appear on any page."""
+        merged = TenderProfile()
+        for p in profiles:
+            for fld in ("region", "location_text", "estimated_value_ils", "publisher_type", "work_type"):
+                if getattr(merged, fld) is None and getattr(p, fld) is not None:
+                    setattr(merged, fld, getattr(p, fld))
+            for d in p.domains:
+                if d not in merged.domains:
+                    merged.domains.append(d)
+        return merged
 
     # ── steps ───────────────────────────────────────────────────────────────
     def _pdf_to_text(self, pdf_path: str, *, on_status: StatusFn) -> str:
@@ -246,6 +271,14 @@ class CriteriaAgent:
             publisher_he="עיריית תל אביב-יפו",
             submission_deadline=f"{y}-07-15T12:00:00+03:00",
             estimated_budget_ils=6_000_000,
+            tender_profile=TenderProfile(
+                region="מרכז",
+                location_text="תל אביב-יפו",
+                domains=["מיזוג אוויר"],
+                estimated_value_ils=6_000_000,
+                publisher_type="municipal",
+                work_type="אספקה והתקנה ותחזוקה",
+            ),
             raw_summary_he=(
                 "מכרז לאספקה, התקנה ותחזוקה של מערכות מיזוג אוויר במבני העירייה לתקופה של שלוש שנים "
                 "עם אופציה להארכה בשנתיים נוספות. נדרש ניסיון מוכח בפרויקטים דומים לגופים ציבוריים "
