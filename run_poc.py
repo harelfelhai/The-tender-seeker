@@ -318,6 +318,17 @@ def main() -> None:
         action="store_true",
         help="Verify each extracted criterion's quote against the source PDF (requires --pdf)",
     )
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Single-shot extraction (truncated) instead of full-coverage map-reduce",
+    )
+    parser.add_argument(
+        "--max-chunk-chars",
+        type=int,
+        default=40_000,
+        help="Max characters per chunk in full-coverage mode (default 40000)",
+    )
     args = parser.parse_args()
 
     console.rule("[bold blue]SmartTender AI — PoC Runner[/bold blue]")
@@ -338,7 +349,12 @@ def main() -> None:
 
     pipeline = TenderPipeline()
     state = pipeline.node_extract_criteria(
-        PipelineState(company=company, pdf_path=args.pdf),
+        PipelineState(
+            company=company,
+            pdf_path=args.pdf,
+            full_coverage=not args.single,
+            max_chunk_chars=args.max_chunk_chars,
+        ),
         on_status=status,
     )
     analysis = state.analysis
@@ -355,7 +371,10 @@ def main() -> None:
             console.print("[yellow]⚠ --verify מחייב --pdf (אין מקור לאימות מול mock)[/yellow]")
         else:
             console.print("[dim cyan]·[/dim cyan] מאמת ציטוטים מול ה-PDF המקורי...")
-            print_verification(verify_extraction(args.pdf, analysis))
+            # In full-coverage mode the whole document is processed, so coverage
+            # should reflect that (no 80K truncation window).
+            sent_window = 80_000 if args.single else 10**12
+            print_verification(verify_extraction(args.pdf, analysis, max_chars_sent=sent_window))
 
     # ── Step 3: run match engine ─────────────────────────────────────────────
     state = pipeline.node_run_match(state, on_status=status)

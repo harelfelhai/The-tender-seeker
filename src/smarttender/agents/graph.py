@@ -28,6 +28,8 @@ class PipelineState:
     pdf_path: Optional[str] = None
     text: Optional[str] = None
     fallback_to_mock: bool = True
+    full_coverage: bool = True          # exhaustive map-reduce over all pages
+    max_chunk_chars: int = 40_000
 
     # produced by nodes
     analysis: Optional[TenderAnalysisOutput] = None
@@ -50,12 +52,20 @@ class TenderPipeline:
             state.log.append(msg)
             on_status(msg)
 
-        state.analysis = self.criteria_agent.extract(
-            pdf_path=state.pdf_path,
-            text=state.text,
-            fallback_to_mock=state.fallback_to_mock,
-            on_status=_status,
-        )
+        if state.full_coverage and state.pdf_path:
+            state.analysis = self.criteria_agent.extract_full(
+                pdf_path=state.pdf_path,
+                max_chunk_chars=state.max_chunk_chars,
+                fallback_to_mock=state.fallback_to_mock,
+                on_status=_status,
+            )
+        else:
+            state.analysis = self.criteria_agent.extract(
+                pdf_path=state.pdf_path,
+                text=state.text,
+                fallback_to_mock=state.fallback_to_mock,
+                on_status=_status,
+            )
         return state
 
     def node_run_match(self, state: PipelineState, *, on_status: StatusFn = _noop) -> PipelineState:

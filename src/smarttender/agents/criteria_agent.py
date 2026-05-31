@@ -8,9 +8,13 @@ mock fallback.  It is intentionally framework-free.  See ARCHITECTURE.md §1.2.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from datetime import date
+from difflib import SequenceMatcher
 from typing import Callable, Optional
 
+from ..rag.chunking import chunk_document, extract_page_texts
 from ..schemas.tender import (
     CriteriaCategory,
     Operator,
@@ -92,6 +96,103 @@ class CriteriaAgent:
                 raise
             on_status(f"חילוץ אמיתי נכשל ({exc}); נופל חזרה ל-mock.")
             return self.mock()
+
+    def extract_full(
+        self,
+        *,
+        pdf_path: str,
+        max_chunk_chars: int = 40_000,
+        overlap_pages: int = 1,
+        fallback_to_mock: bool = True,
+        on_status: StatusFn = _noop,
+    ) -> TenderAnalysisOutput:
+        """Exhaustive map-reduce extraction over the ENTIRE document (100% coverage).
+
+        Splits the PDF into context-sized chunks, extracts criteria from each,
+        then merges and de-duplicates. Unlike `extract`, nothing is truncated —
+        every page is processed, so no criterion can be silently missed.
+        """
+        try:
+            pages = extract_page_texts(pdf_path)
+            if not pages:
+                raise ValueError("לא חולץ טקסט (PDF סרוק?) — OCR לא מיושם ב-PoC")
+            chunks = chunk_document(pages, max_chars=max_chunk_chars, overlap_pages=overlap_pages)
+            on_status(
+                f"כיסוי מלא: {len(pages)} עמודים → {len(chunks)} chunks "
+                f"(~{max_chunk_chars:,} תווים כ\"א, חפיפה {overlap_pages} עמ')"
+            )
+
+            outputs: list[TenderAnalysisOutput] = []
+            for ch in chunks:
+                on_status(f"מחלץ chunk {ch.index + 1}/{len(chunks)} (עמ' {ch.page_range_str})...")
+                outputs.append(self._call_llm(ch.text, on_status=_noop))
+
+            merged = self._merge_outputs(outputs)
+            on_status(
+                f"מוזגו {sum(len(o.criteria) for o in outputs)} קריטריונים גולמיים "
+                f"→ {len(merged.criteria)} ייחודיים (לאחר dedup)"
+            )
+            return merged
+        except Exception as exc:  # noqa: BLE001 - PoC: degrade gracefully
+            if not fallback_to_mock:
+                raise
+            on_status(f"חילוץ מלא נכשל ({exc}); נופל חזרה ל-mock.")
+            return self.mock()
+
+    # ── merge / dedup ─────────────────────────────────────────────────────────
+    @staticmethod
+    def _norm(text: str) -> str:
+        text = unicodedata.normalize("NFKC", text or "")
+        text = re.sub(r"[֑-ׇ]", "", text)            # niqqud
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    def _merge_outputs(self, outputs: list[TenderAnalysisOutput]) -> TenderAnalysisOutput:
+        """Merge per-chunk outputs: take metadata from the richest chunk, then
+        union the criteria while de-duplicating near-identical descriptions."""
+        if not outputs:
+            return self.mock()
+
+        # Metadata: prefer the output with the longest title (usually the cover/intro).
+        meta_src = max(outputs, key=lambda o: len(o.title_he or ""))
+
+        kept: list[TenderCriteriaPredicate] = []
+        for out in outputs:
+            for crit in out.criteria:
+                key = self._norm(crit.description_he)
+                dup_idx = next(
+                    (
+                        i
+                        for i, k in enumerate(kept)
+                        if SequenceMatcher(None, key, self._norm(k.description_he)).ratio() >= 0.88
+                    ),
+                    None,
+                )
+                if dup_idx is None:
+                    kept.append(crit)
+                elif crit.confidence > kept[dup_idx].confidence:
+                    kept.append(crit)  # keep higher-confidence variant
+                    kept.pop(dup_idx)
+
+        # Renumber IDs deterministically.
+        for i, crit in enumerate(kept, 1):
+            crit.id = f"C{i}"
+
+        return TenderAnalysisOutput(
+            tender_id=meta_src.tender_id,
+            title_he=meta_src.title_he,
+            publisher_he=meta_src.publisher_he,
+            submission_deadline=meta_src.submission_deadline,
+            estimated_budget_ils=meta_src.estimated_budget_ils,
+            criteria=kept,
+            raw_summary_he=meta_src.raw_summary_he,
+            extraction_meta={
+                "source": "full-coverage (map-reduce over all pages)",
+                "chunks": len(outputs),
+                "raw_criteria": sum(len(o.criteria) for o in outputs),
+                "schema_version": "1.0",
+            },
+        )
 
     # ── steps ───────────────────────────────────────────────────────────────
     def _pdf_to_text(self, pdf_path: str, *, on_status: StatusFn) -> str:
