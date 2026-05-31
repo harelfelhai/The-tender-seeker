@@ -41,6 +41,7 @@ load_dotenv()
 
 # ── project imports ──────────────────────────────────────────────────────────
 from src.smarttender.agents.graph import PipelineState, TenderPipeline
+from src.smarttender.eval.verify import VerificationReport, verify_extraction
 from src.smarttender.schemas.company_profile import (
     CompanyProfile,
     ContractorClassification,
@@ -225,6 +226,79 @@ def print_report(report: MatchReport, analysis: TenderAnalysisOutput) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 4b. CITATION-GROUNDING VERIFICATION REPORT
+# ══════════════════════════════════════════════════════════════════════════════
+
+_VERIFY_STATUS = {
+    "grounded":    ("✅", "מעוגן במקור", "green"),
+    "partial":     ("🟡", "התאמה חלקית", "yellow"),
+    "not_found":   ("❌", "לא נמצא במקור", "red"),
+    "no_citation": ("➖", "ללא ציטוט", "dim"),
+}
+
+
+def print_verification(report: VerificationReport) -> None:
+    console.print()
+
+    cov_pct = report.coverage_rate * 100
+    cov_style = "green" if cov_pct >= 95 else ("yellow" if cov_pct >= 60 else "red")
+    ground_pct = report.grounding_rate * 100
+    g_style = "green" if ground_pct >= 90 else ("yellow" if ground_pct >= 70 else "red")
+
+    console.print(
+        Panel(
+            f"עיגון ציטוטים: [bold {g_style}]{report.grounded}/"
+            f"{report.total_criteria - report.no_citation}[/bold {g_style}] "
+            f"מעוגנים במקור ({ground_pct:.0f}%)   "
+            f"[dim]חלקי: {report.partial} · לא נמצא: {report.not_found} · "
+            f"ללא ציטוט: {report.no_citation}[/dim]\n"
+            f"כיסוי מסמך: [bold {cov_style}]{report.pages_sent_to_llm}/"
+            f"{report.pages_with_text}[/bold {cov_style}] עמודים נשלחו ל-LLM "
+            f"([{cov_style}]{cov_pct:.0f}%[/{cov_style}] מהטקסט; "
+            f"{report.chars_sent:,}/{report.chars_total:,} תווים)",
+            title="[bold blue]אימות נאמנות למקור (Citation Grounding)[/bold blue]",
+            border_style="blue",
+            padding=(1, 2),
+        )
+    )
+
+    if cov_pct < 95:
+        console.print(
+            f"[bold red]⚠ אזהרת כיסוי:[/bold red] רק {cov_pct:.0f}% מהמסמך נשלח ל-LLM — "
+            f"קריטריונים בעמודים {report.pages_sent_to_llm + 1}–{report.pages_with_text} "
+            f"[bold]לא נקראו[/bold]. נדרשת שכבת RAG כדי לכסות את כל המסמך."
+        )
+
+    tbl = Table(box=box.ROUNDED, show_lines=False, header_style="bold white on dark_blue")
+    tbl.add_column("#", style="dim", width=4)
+    tbl.add_column("דרישה", min_width=34)
+    tbl.add_column("עמ׳ צוין", width=8, justify="center")
+    tbl.add_column("נמצא בעמ׳", width=9, justify="center")
+    tbl.add_column("ציון", width=6, justify="center")
+    tbl.add_column("אימות", width=16)
+
+    for r in report.results:
+        icon, label, style = _VERIFY_STATUS[r.status]
+        matched = str(r.matched_page) if r.matched_page else "–"
+        flag = ""
+        if r.matched_page and r.cited_page and r.matched_page != r.cited_page:
+            flag = " [dim](שונה)[/dim]"
+        tbl.add_row(
+            r.criterion_id,
+            r.description_he[:60],
+            str(r.cited_page) if r.cited_page else "–",
+            matched + flag,
+            f"{r.score:.2f}",
+            f"[{style}]{icon} {label}[/{style}]",
+        )
+    console.print(tbl)
+    console.print(
+        "[dim]איך לקרוא: 'ציון' = דמיון הציטוט שחולץ לטקסט שבעמוד המצוין ב-PDF. "
+        "ציון ≥0.85 = הציטוט קיים במקור (לא הוזיה).[/dim]\n"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 5.  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -238,6 +312,11 @@ def main() -> None:
         "--dump-criteria",
         action="store_true",
         help="Print the raw extracted TenderAnalysisOutput JSON and exit",
+    )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify each extracted criterion's quote against the source PDF (requires --pdf)",
     )
     args = parser.parse_args()
 
@@ -269,6 +348,14 @@ def main() -> None:
     if args.dump_criteria:
         console.print_json(json.dumps(analysis.model_dump(), ensure_ascii=False, indent=2))
         return
+
+    # ── Step 2b: verify extraction faithfulness against the source PDF ───────
+    if args.verify:
+        if not args.pdf:
+            console.print("[yellow]⚠ --verify מחייב --pdf (אין מקור לאימות מול mock)[/yellow]")
+        else:
+            console.print("[dim cyan]·[/dim cyan] מאמת ציטוטים מול ה-PDF המקורי...")
+            print_verification(verify_extraction(args.pdf, analysis))
 
     # ── Step 3: run match engine ─────────────────────────────────────────────
     state = pipeline.node_run_match(state, on_status=status)
