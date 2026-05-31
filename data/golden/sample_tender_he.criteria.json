@@ -1,0 +1,60 @@
+{
+  "_doc": "Ground-truth labels for data/raw/sample_tender_he.pdf (authored by us, so the labels are exact). Used by eval/criteria_eval.py to compute precision/recall/F1.",
+  "source_pdf": "data/raw/sample_tender_he.pdf",
+  "criteria": [
+    {
+      "category": "financial",
+      "field": "annual_turnover_ils",
+      "operator": ">=",
+      "value": 5000000,
+      "mandatory": true,
+      "description_he": "מחזור כספי שנתי של לפחות 5,000,000 ש\"ח בכל אחת מ-3 השנים האחרונות",
+      "key_terms": ["מחזור", "5,000,000", "3 השנים"]
+    },
+    {
+      "category": "classification",
+      "field": "contractor_classification",
+      "operator": "satisfies_classification",
+      "value": {"branch_code": "170", "min_group_letter": "ג", "min_financial_tier": 3},
+      "mandatory": true,
+      "description_he": "סיווג קבלני ענף 170 (מיזוג אוויר), קבוצה ג' והיקף כספי 3 לפחות",
+      "key_terms": ["סיווג", "170", "קבוצה ג", "היקף כספי 3"]
+    },
+    {
+      "category": "experience",
+      "field": "similar_public_projects",
+      "operator": "count>=",
+      "value": 3,
+      "mandatory": true,
+      "description_he": "ביצוע לפחות 3 פרויקטים דומים לגופים ציבוריים ב-5 השנים האחרונות",
+      "key_terms": ["3 פרויקטים", "גופים ציבוריים", "5 השנים"]
+    },
+    {
+      "category": "certification",
+      "field": "certifications",
+      "operator": "contains",
+      "value": "ISO 9001",
+      "mandatory": true,
+      "description_he": "תקן ISO 9001 בתוקף",
+      "key_terms": ["ISO 9001"]
+    },
+    {
+      "category": "insurance",
+      "field": "insurance_third_party_liability",
+      "operator": ">=",
+      "value": 10000000,
+      "mandatory": true,
+      "description_he": "ביטוח אחריות כלפי צד שלישי בסכום של לפחות 10,000,000 ש\"ח",
+      "key_terms": ["ביטוח", "צד שלישי", "10,000,000"]
+    },
+    {
+      "category": "certification",
+      "field": "certifications",
+      "operator": "contains",
+      "value": "ISO 45001",
+      "mandatory": false,
+      "description_he": "תקן ISO 45001 (בטיחות וגהות תעסוקתית) — יתרון",
+      "key_terms": ["ISO 45001", "יתרון"]
+    }
+  ]
+}

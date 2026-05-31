@@ -42,6 +42,7 @@ load_dotenv()
 
 # ── project imports ──────────────────────────────────────────────────────────
 from src.smarttender.agents.graph import PipelineState, TenderPipeline
+from src.smarttender.eval.criteria_eval import EvalReport, evaluate_against_golden, load_golden
 from src.smarttender.eval.recall_audit import (
     RecallAuditReport,
     audit_recall_heuristic,
@@ -440,6 +441,49 @@ def print_recall_audit(report: RecallAuditReport, missed=None) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 4d. GOLDEN-SET F1 EVALUATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+def print_eval(report: EvalReport) -> None:
+    console.print()
+
+    def pct(x: float) -> str:
+        return f"{x * 100:.0f}%"
+
+    f1_style = "green" if report.f1 >= 0.85 else ("yellow" if report.f1 >= 0.6 else "red")
+    console.print(
+        Panel(
+            f"Precision: [bold]{pct(report.precision)}[/bold] "
+            f"[dim]({report.tp}/{report.tp + report.fp} שחולצו נכונים)[/dim]\n"
+            f"Recall:    [bold]{pct(report.recall)}[/bold] "
+            f"[dim]({report.tp}/{report.tp + report.fn} מה-golden נמצאו)[/dim]\n"
+            f"F1:        [bold {f1_style}]{pct(report.f1)}[/bold {f1_style}]"
+            f"   [dim](סף שער CI: 85%)[/dim]",
+            title="[bold green]הערכת דיוק מול Golden Set[/bold green]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
+
+    if report.missed:
+        console.print(f"[bold red]❌ FN — {len(report.missed)} תנאי סף ב-golden שלא חולצו (פגיעה ב-recall):[/bold red]")
+        for g in report.missed:
+            console.print(f"   • {g.get('description_he', '')[:80]}")
+    if report.spurious:
+        console.print(f"[bold yellow]⚠ FP — {len(report.spurious)} שחולצו ואינם ב-golden (פגיעה ב-precision):[/bold yellow]")
+        for p in report.spurious[:8]:
+            console.print(f"   • [{p.id}] {p.description_he[:80]}")
+        if len(report.spurious) > 8:
+            console.print(f"   [dim]... ועוד {len(report.spurious) - 8}[/dim]")
+    if not report.missed and not report.spurious:
+        console.print("[green]✓ התאמה מושלמת ל-golden (אין FN ואין FP).[/green]")
+    console.print(
+        "[dim]הערה: FP במכרז מורכב כולל לרוב דרישות תיעודיות אמיתיות שאינן ב-golset "
+        "המינימלי — לכן בוחנים בעיקר את ה-recall על תנאי הסף המהותיים.[/dim]\n"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 5.  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -468,6 +512,13 @@ def main() -> None:
         "--audit-llm",
         action="store_true",
         help="Also run the independent second-model (LLM) completeness judge (requires --pdf + key)",
+    )
+    parser.add_argument(
+        "--eval",
+        type=str,
+        default=None,
+        metavar="GOLDEN_JSON",
+        help="Score extracted criteria against a golden file (precision/recall/F1)",
     )
     parser.add_argument(
         "--single",
@@ -542,6 +593,14 @@ def main() -> None:
                 else:
                     missed = audit_recall_llm(args.pdf, analysis, api_key=key, on_status=status)
             print_recall_audit(recall_report, missed)
+
+    # ── Step 2d: golden-set F1 evaluation ────────────────────────────────────
+    if args.eval:
+        if not Path(args.eval).exists():
+            console.print(f"[red]קובץ golden לא נמצא: {args.eval}[/red]")
+        else:
+            console.print(f"[dim cyan]·[/dim cyan] מעריך מול golden: {args.eval}")
+            print_eval(evaluate_against_golden(analysis, load_golden(args.eval)))
 
     # ── Step 3: eligibility (match) then relevance, gated by eligibility ─────
     state = pipeline.node_run_match(state, on_status=status)
