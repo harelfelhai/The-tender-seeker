@@ -41,6 +41,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── project imports ──────────────────────────────────────────────────────────
+from src.smarttender.agents.criteria_agent import CriteriaAgent
 from src.smarttender.agents.graph import PipelineState, TenderPipeline
 from src.smarttender.eval.criteria_eval import EvalReport, evaluate_against_golden, load_golden
 from src.smarttender.eval.recall_audit import (
@@ -531,6 +532,11 @@ def main() -> None:
         default=40_000,
         help="Max characters per chunk in full-coverage mode (default 40000)",
     )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Disable Anthropic prompt caching (useful for baseline cost comparison)",
+    )
     args = parser.parse_args()
 
     console.rule("[bold blue]SmartTender AI — PoC Runner[/bold blue]")
@@ -549,7 +555,11 @@ def main() -> None:
     def status(msg: str) -> None:
         console.print(f"[dim cyan]·[/dim cyan] {msg}")
 
-    pipeline = TenderPipeline()
+    use_cache = not args.no_cache
+    if args.pdf:
+        cache_label = "[green]מופעל[/green]" if use_cache else "[yellow]מושבת (--no-cache)[/yellow]"
+        console.print(f"[dim]Prompt caching: {cache_label}[/dim]")
+    pipeline = TenderPipeline(criteria_agent=CriteriaAgent(use_cache=use_cache))
     state = pipeline.node_extract_criteria(
         PipelineState(
             company=company,

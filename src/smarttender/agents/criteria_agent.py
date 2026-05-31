@@ -54,11 +54,8 @@ _EXTRACTION_SYSTEM = """\
 אם פרט אינו מופיע ב-chunk הנוכחי — השאר null (אל תמציא).
 """
 
-_EXTRACTION_USER = """\
-חלץ את תנאי הסף מהמכרז הבא ומלא את הסכמה המובנית:
-
-{text}
-"""
+# Short trailing instruction — NOT cached so prompt iterations stay cheap.
+_EXTRACTION_INSTRUCTION = "חלץ את תנאי הסף מהמכרז לעיל ומלא את הסכמה המובנית במדויק."
 
 
 class CriteriaAgent:
@@ -71,11 +68,13 @@ class CriteriaAgent:
         api_key: Optional[str] = None,
         max_tokens: int = 8_192,
         max_chars: int = 80_000,
+        use_cache: bool = True,
     ) -> None:
         self.model = model
         self.api_key = api_key
         self.max_tokens = max_tokens
         self.max_chars = max_chars
+        self.use_cache = use_cache
 
     # ── public entry point ──────────────────────────────────────────────────
     def extract(
@@ -202,6 +201,7 @@ class CriteriaAgent:
                 "chunks": len(outputs),
                 "raw_criteria": sum(len(o.criteria) for o in outputs),
                 "schema_version": "1.0",
+                "prompt_caching": self.use_cache,
             },
         )
 
@@ -249,14 +249,29 @@ class CriteriaAgent:
             raise RuntimeError("ANTHROPIC_API_KEY לא מוגדר")
 
         on_status("שולח ל-Claude עם אכיפת schema (instructor)...")
+        truncated = text[: self.max_chars]
+
+        if self.use_cache:
+            # Prompt caching: system + document body are marked as cacheable breakpoints.
+            # The short trailing instruction is left uncached — so tweaking it during
+            # prompt engineering pays only ~500 tokens instead of the full 15K+ document.
+            system_content: list | str = [
+                {"type": "text", "text": _EXTRACTION_SYSTEM, "cache_control": {"type": "ephemeral"}}
+            ]
+            user_content: list | str = [
+                {"type": "text", "text": truncated, "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": _EXTRACTION_INSTRUCTION},
+            ]
+        else:
+            system_content = _EXTRACTION_SYSTEM
+            user_content = f"חלץ את תנאי הסף מהמכרז הבא ומלא את הסכמה המובנית:\n\n{truncated}"
+
         client = instructor.from_anthropic(anthropic.Anthropic(api_key=api_key))
         return client.messages.create(
             model=self.model,
             max_tokens=self.max_tokens,
-            system=_EXTRACTION_SYSTEM,
-            messages=[
-                {"role": "user", "content": _EXTRACTION_USER.format(text=text[: self.max_chars])}
-            ],
+            system=system_content,
+            messages=[{"role": "user", "content": user_content}],
             response_model=TenderAnalysisOutput,
         )
 
