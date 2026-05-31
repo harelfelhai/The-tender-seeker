@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -41,6 +42,11 @@ load_dotenv()
 
 # ── project imports ──────────────────────────────────────────────────────────
 from src.smarttender.agents.graph import PipelineState, TenderPipeline
+from src.smarttender.eval.recall_audit import (
+    RecallAuditReport,
+    audit_recall_heuristic,
+    audit_recall_llm,
+)
 from src.smarttender.eval.verify import VerificationReport, verify_extraction
 from src.smarttender.schemas.company_profile import (
     CompanyProfile,
@@ -378,6 +384,62 @@ def print_verification(report: VerificationReport) -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# 4c. RECALL AUDIT (completeness — "did we miss a requirement?")
+# ══════════════════════════════════════════════════════════════════════════════
+
+def print_recall_audit(report: RecallAuditReport, missed=None) -> None:
+    console.print()
+    cov = report.obligation_coverage_rate * 100
+    style = "green" if cov >= 90 else ("yellow" if cov >= 70 else "red")
+    console.print(
+        Panel(
+            f"כיסוי עמודי-חובה: [bold {style}]{report.covered_obligation_pages}/"
+            f"{report.obligation_pages}[/bold {style}] עמודים עם שפת-חובה מצוטטים "
+            f"ע\"י קריטריון ({cov:.0f}%)\n"
+            f"עמודים חשודים לבדיקה ידנית: [bold]{len(report.suspect_pages)}[/bold] "
+            f"[dim](מתוך {report.total_pages} — צמצום הבדיקה הידנית)[/dim]",
+            title="[bold cyan]ביקורת שלמות (Recall) — רשת ביטחון היוריסטית[/bold cyan]",
+            border_style="cyan",
+            padding=(1, 2),
+        )
+    )
+
+    if report.suspect_pages:
+        tbl = Table(box=box.ROUNDED, header_style="bold white on dark_cyan", show_lines=True)
+        tbl.add_column("עמ׳", width=5, justify="center")
+        tbl.add_column("רמזי חובה שנמצאו", min_width=22)
+        tbl.add_column("קטע מהעמוד", min_width=44)
+        for s in report.suspect_pages[:12]:
+            cues = ", ".join(s.strong_hits + s.weak_hits)
+            tbl.add_row(str(s.page), cues, s.snippet[:90])
+        console.print(tbl)
+        if len(report.suspect_pages) > 12:
+            console.print(f"[dim]... ועוד {len(report.suspect_pages) - 12} עמודים חשודים[/dim]")
+        console.print(
+            "[dim]פירוש: בעמודים אלה יש שפת-חובה אך אף קריטריון לא מצטט אותם — "
+            "מומלץ מעבר ידני ממוקד (לא על כל המסמך).[/dim]"
+        )
+    else:
+        console.print("[green]✓ כל עמודי שפת-החובה מכוסים ע\"י קריטריון שחולץ.[/green]")
+
+    if missed is not None:
+        console.print()
+        if missed:
+            console.print(
+                f"[bold yellow]🔎 השופט העצמאי (LLM) זיהה {len(missed)} דרישות שייתכן והוחמצו:[/bold yellow]"
+            )
+            for i, m in enumerate(missed[:10], 1):
+                pg = f" (עמ' {m.page})" if m.page else ""
+                console.print(f"  {i}.{pg} {m.description_he[:90]}")
+                console.print(f"     [dim]→ {m.why_binding_he[:90]}[/dim]")
+            if len(missed) > 10:
+                console.print(f"  [dim]... ועוד {len(missed) - 10}[/dim]")
+        else:
+            console.print("[green]✓ השופט העצמאי (LLM) לא מצא דרישות מחייבות חסרות.[/green]")
+    console.print()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # 5.  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -396,6 +458,16 @@ def main() -> None:
         "--verify",
         action="store_true",
         help="Verify each extracted criterion's quote against the source PDF (requires --pdf)",
+    )
+    parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="Recall audit: flag obligation-bearing pages no criterion cites (heuristic, no LLM)",
+    )
+    parser.add_argument(
+        "--audit-llm",
+        action="store_true",
+        help="Also run the independent second-model (LLM) completeness judge (requires --pdf + key)",
     )
     parser.add_argument(
         "--single",
@@ -454,6 +526,22 @@ def main() -> None:
             # should reflect that (no 80K truncation window).
             sent_window = 80_000 if args.single else 10**12
             print_verification(verify_extraction(args.pdf, analysis, max_chars_sent=sent_window))
+
+    # ── Step 2c: recall audit (completeness) ─────────────────────────────────
+    if args.audit or args.audit_llm:
+        if not args.pdf:
+            console.print("[yellow]⚠ ביקורת recall מחייבת --pdf[/yellow]")
+        else:
+            console.print("[dim cyan]·[/dim cyan] רשת ביטחון היוריסטית — מחפש עמודי-חובה לא מכוסים...")
+            recall_report = audit_recall_heuristic(args.pdf, analysis)
+            missed = None
+            if args.audit_llm:
+                key = os.getenv("ANTHROPIC_API_KEY")
+                if not key:
+                    console.print("[yellow]⚠ --audit-llm מחייב ANTHROPIC_API_KEY[/yellow]")
+                else:
+                    missed = audit_recall_llm(args.pdf, analysis, api_key=key, on_status=status)
+            print_recall_audit(recall_report, missed)
 
     # ── Step 3: eligibility (match) then relevance, gated by eligibility ─────
     state = pipeline.node_run_match(state, on_status=status)

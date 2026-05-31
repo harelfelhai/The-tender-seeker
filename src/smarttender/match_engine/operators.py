@@ -66,13 +66,44 @@ def _current_year() -> int:
     return date.today().year
 
 
+def _to_number(value) -> Optional[float]:
+    """Best-effort parse of an LLM-provided value to a number.
+
+    Real extractions return things like '5% מהוצאות הפיתוח' or '50,000 ש"ח' for
+    fields we expected to be numeric. We salvage an embedded number when one is
+    clearly present, else return None so the caller can mark it unverifiable.
+    """
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    cleaned = value.replace(",", "")
+    # Reject values carrying a unit/percent that changes meaning (e.g. "5%").
+    if "%" in cleaned:
+        return None
+    m = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    return float(m.group()) if m else None
+
+
+def _unverifiable(desc: str, required: str) -> "EvalResult":
+    return EvalResult(
+        False,
+        f"דרישה שאינה ניתנת לאימות אוטומטי — בדיקה ידנית: {desc[:60]}",
+        "—",
+        required,
+        unverifiable=True,
+    )
+
+
 # ── per-operator evaluators ──────────────────────────────────────────────────
 
 def _eval_annual_turnover(
     predicate: TenderCriteriaPredicate, profile: CompanyProfile
 ) -> EvalResult:
     """Check annual_revenues with lookback and aggregation logic."""
-    required = float(predicate.value)
+    required = _to_number(predicate.value)
+    if required is None:
+        return _unverifiable(predicate.description_he, str(predicate.value))
     lookback = predicate.lookback_years or 1
     aggregation = predicate.aggregation or "each_year"
     base_year = _current_year()
@@ -214,7 +245,10 @@ def _eval_count_gte(
     predicate: TenderCriteriaPredicate, profile: CompanyProfile
 ) -> EvalResult:
     """Count filtered items in a list field and compare against a minimum."""
-    required_count = int(predicate.value)
+    _rc = _to_number(predicate.value)
+    if _rc is None:
+        return _unverifiable(predicate.description_he, str(predicate.value))
+    required_count = int(_rc)
     qualifier = predicate.qualifier or {}
     lookback = predicate.lookback_years
     base_year = _current_year()
@@ -312,7 +346,9 @@ def _eval_insurance(
     predicate: TenderCriteriaPredicate, profile: CompanyProfile
 ) -> EvalResult:
     """Evaluate insurance coverage. Field format: insurance_{type}."""
-    required = float(predicate.value)
+    required = _to_number(predicate.value)
+    if required is None:
+        return _unverifiable(predicate.description_he, str(predicate.value))
     ins_type = predicate.field[len("insurance_"):]  # strip "insurance_" prefix
 
     coverage = next(
