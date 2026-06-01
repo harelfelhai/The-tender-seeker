@@ -48,6 +48,16 @@ class CompanyRow(Base):
     created_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
 
 
+class ApiKeyRow(Base):
+    __tablename__ = "api_keys"
+
+    key_hash = Column(String, primary_key=True)     # SHA-256 of plaintext key
+    company_id = Column(String, nullable=False, index=True)
+    label = Column(String, nullable=True)           # human-readable note
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class MatchResultRow(Base):
     __tablename__ = "match_results"
 

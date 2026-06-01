@@ -5,6 +5,7 @@ Process-once architecture:
   GET  /match/{company}/{tender}  →  deterministic match on stored JSON (free)
 
 Every tender is extracted ONCE regardless of how many companies query it.
+Authentication: X-API-Key header (SHA-256 hashed at rest, shown plaintext once).
 """
 from __future__ import annotations
 
@@ -13,10 +14,8 @@ import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..agents.criteria_agent import CriteriaAgent, resolve_model
@@ -25,7 +24,8 @@ from ..match_engine.engine import evaluate_match
 from ..match_engine.relevance import score_relevance
 from ..schemas.company_profile import CompanyProfile
 from ..schemas.tender import TenderAnalysisOutput
-from .database import CompanyRow, MatchResultRow, TenderRow, get_db, init_db
+from .auth import generate_key, hash_key, require_auth, require_company_access
+from .database import ApiKeyRow, CompanyRow, MatchResultRow, TenderRow, get_db, init_db
 
 
 # ── lifespan ──────────────────────────────────────────────────────────────────
@@ -38,31 +38,88 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="SmartTender AI",
-    description="Hebrew RAG pipeline: extract tender criteria once, match against many companies.",
+    description=(
+        "Hebrew RAG pipeline: extract tender criteria once, match against many companies.\n\n"
+        "**Authentication**: pass your API key in the `X-API-Key` header."
+    ),
     version="0.1.0",
     lifespan=lifespan,
 )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# /tenders
+# /auth
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/tenders/ingest", summary="העלה PDF — חלץ פעם אחת, שמור לנצח")
+@app.post("/auth/register", summary="רשום חברה וקבל API key", tags=["auth"])
+def register(profile: CompanyProfile, db: Session = Depends(get_db)):
+    """Create a company profile and issue an API key.
+
+    **The plaintext key is returned ONCE — store it securely.**
+    Subsequent requests must include `X-API-Key: <key>` in the header.
+    """
+    company_id = profile.company_reg_id or str(uuid.uuid4())
+
+    # Upsert company
+    co_row = db.get(CompanyRow, company_id) or CompanyRow(id=company_id)
+    co_row.name = profile.company_name
+    co_row.profile_json = profile.model_dump_json()
+    db.add(co_row)
+
+    # Generate key (stored as hash only)
+    plaintext = generate_key()
+    key_row = ApiKeyRow(
+        key_hash=hash_key(plaintext),
+        company_id=company_id,
+        label=f"key for {profile.company_name}",
+    )
+    db.add(key_row)
+    db.commit()
+
+    return {
+        "company_id": company_id,
+        "api_key": plaintext,
+        "warning": "שמור את המפתח — הוא מוצג פעם אחת בלבד ולא נשמר בשרת",
+    }
+
+
+@app.get("/auth/me", summary="מי אני?", tags=["auth"])
+def me(auth: ApiKeyRow = Depends(require_auth), db: Session = Depends(get_db)):
+    co = db.get(CompanyRow, auth.company_id)
+    return {
+        "company_id": auth.company_id,
+        "company_name": co.name if co else None,
+        "key_label": auth.label,
+        "created_at": auth.created_at,
+    }
+
+
+@app.delete("/auth/revoke", summary="בטל את ה-API key הנוכחי", tags=["auth"])
+def revoke(auth: ApiKeyRow = Depends(require_auth), db: Session = Depends(get_db)):
+    auth.is_active = False
+    db.commit()
+    return {"message": "API key בוטל"}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# /tenders  — shared (any authenticated company can read/ingest)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/tenders/ingest", summary="העלה PDF — חלץ פעם אחת, שמור לנצח", tags=["tenders"])
 async def ingest_tender(
     file: UploadFile = File(..., description="קובץ PDF של המכרז"),
     model: str = Form(default="sonnet", description="haiku / sonnet / opus"),
+    auth: ApiKeyRow = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    """Upload a tender PDF. Extraction runs ONCE and is stored.
-    Subsequent match requests use the stored JSON — no re-extraction, no extra cost.
+    """Upload a tender PDF. Extraction runs ONCE and the result is stored.
+    Any subsequent match request uses the stored JSON — no re-extraction, no extra cost.
     """
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "יש להעלות קובץ PDF בלבד")
 
     model_id = resolve_model(model)
 
-    # Write to temp file (LLM pipeline expects a path)
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(await file.read())
         tmp_path = tmp.name
@@ -77,7 +134,6 @@ async def ingest_tender(
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    # Upsert: re-ingesting the same tender_id overwrites (idempotent)
     row = db.get(TenderRow, analysis.tender_id) or TenderRow(id=analysis.tender_id)
     row.title_he = analysis.title_he
     row.publisher_he = analysis.publisher_he
@@ -93,12 +149,15 @@ async def ingest_tender(
         "publisher_he": analysis.publisher_he,
         "criteria_count": len(analysis.criteria),
         "model_used": model_id,
-        "message": f"מכרז נשמר — לא יחולץ שוב. השתמש ב-/match/{{company_id}}/{analysis.tender_id}",
+        "message": f"מכרז נשמר — לא יחולץ שוב. השתמש ב-/match/{auth.company_id}/{analysis.tender_id}",
     }
 
 
-@app.get("/tenders", summary="רשימת כל המכרזים שחולצו")
-def list_tenders(db: Session = Depends(get_db)):
+@app.get("/tenders", summary="רשימת כל המכרזים שחולצו", tags=["tenders"])
+def list_tenders(
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
     rows = db.query(TenderRow).order_by(TenderRow.created_at.desc()).all()
     return [
         {
@@ -113,48 +172,57 @@ def list_tenders(db: Session = Depends(get_db)):
     ]
 
 
-@app.get("/tenders/{tender_id}", summary="פרטי מכרז + קריטריונים שחולצו")
-def get_tender(tender_id: str, db: Session = Depends(get_db)):
+@app.get("/tenders/{tender_id}", summary="פרטי מכרז + קריטריונים שחולצו", tags=["tenders"])
+def get_tender(
+    tender_id: str,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
     row = _get_or_404(db, TenderRow, tender_id, "מכרז")
     return json.loads(row.analysis_json)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# /companies
+# /companies  — each company sees only its own data
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.post("/companies", summary="הוסף חברה")
-def create_company(profile: CompanyProfile, db: Session = Depends(get_db)):
-    company_id = profile.company_reg_id or str(uuid.uuid4())
-    row = db.get(CompanyRow, company_id) or CompanyRow(id=company_id)
-    row.name = profile.company_name
-    row.profile_json = profile.model_dump_json()
-    db.add(row)
-    db.commit()
-    return {"company_id": company_id, "name": profile.company_name}
-
-
-@app.get("/companies", summary="רשימת כל החברות")
-def list_companies(db: Session = Depends(get_db)):
-    rows = db.query(CompanyRow).order_by(CompanyRow.created_at.desc()).all()
-    return [{"company_id": r.id, "name": r.name, "created_at": r.created_at} for r in rows]
-
-
-@app.get("/companies/{company_id}", summary="פרופיל חברה")
-def get_company(company_id: str, db: Session = Depends(get_db)):
-    row = _get_or_404(db, CompanyRow, company_id, "חברה")
+@app.get("/companies/me", summary="פרופיל החברה שלי", tags=["companies"])
+def get_my_company(
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    row = _get_or_404(db, CompanyRow, auth.company_id, "חברה")
     return json.loads(row.profile_json)
 
 
+@app.put("/companies/me", summary="עדכן פרופיל החברה שלי", tags=["companies"])
+def update_my_company(
+    profile: CompanyProfile,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    row = _get_or_404(db, CompanyRow, auth.company_id, "חברה")
+    row.name = profile.company_name
+    row.profile_json = profile.model_dump_json()
+    db.commit()
+    return {"company_id": auth.company_id, "name": profile.company_name, "updated": True}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# /match  — deterministic, no LLM, free
+# /match  — deterministic, no LLM, free; scoped to authenticated company
 # ══════════════════════════════════════════════════════════════════════════════
 
-@app.get("/match/{company_id}/{tender_id}", summary="בדוק כשירות ורלוונטיות (ללא LLM)")
-def match(company_id: str, tender_id: str, db: Session = Depends(get_db)):
-    """Run the deterministic Match Engine against stored JSON. No LLM, no cost."""
-    company_row = _get_or_404(db, CompanyRow, company_id, "חברה")
+@app.get("/match/{tender_id}", summary="בדוק כשירות ורלוונטיות למכרז (ללא LLM)", tags=["match"])
+def match(
+    tender_id: str,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Run the deterministic Match Engine against the stored tender JSON.
+    No LLM call, no cost — uses the company profile from the authenticated key.
+    """
     tender_row = _get_or_404(db, TenderRow, tender_id, "מכרז")
+    company_row = _get_or_404(db, CompanyRow, auth.company_id, "חברה")
 
     company = CompanyProfile.model_validate_json(company_row.profile_json)
     analysis = TenderAnalysisOutput.model_validate_json(tender_row.analysis_json)
@@ -163,11 +231,10 @@ def match(company_id: str, tender_id: str, db: Session = Depends(get_db)):
     relevance = score_relevance(company, analysis.tender_profile)
     final_score = 0.0 if not match_report.is_eligible else relevance.relevance_score
 
-    # Cache result
-    result_id = f"{company_id}__{tender_id}"
-    cached = MatchResultRow(
+    result_id = f"{auth.company_id}__{tender_id}"
+    db.merge(MatchResultRow(
         id=result_id,
-        company_id=company_id,
+        company_id=auth.company_id,
         tender_id=tender_id,
         is_eligible=match_report.is_eligible,
         compatibility_score=match_report.compatibility_score,
@@ -178,12 +245,11 @@ def match(company_id: str, tender_id: str, db: Session = Depends(get_db)):
             "relevance": relevance.model_dump(),
             "final_score": final_score,
         }, ensure_ascii=False),
-    )
-    db.merge(cached)
+    ))
     db.commit()
 
     return {
-        "company_id": company_id,
+        "company_id": auth.company_id,
         "tender_id": tender_id,
         "is_eligible": match_report.is_eligible,
         "compatibility_score": match_report.compatibility_score,
@@ -195,15 +261,20 @@ def match(company_id: str, tender_id: str, db: Session = Depends(get_db)):
     }
 
 
-@app.get("/companies/{company_id}/matches", summary="כל המכרזים מדורגים לפי ציון")
-def company_matches(company_id: str, db: Session = Depends(get_db)):
-    """Match a company against ALL stored tenders. Returns ranked list."""
-    company_row = _get_or_404(db, CompanyRow, company_id, "חברה")
+@app.get("/match", summary="כל המכרזים מדורגים עבור החברה שלי", tags=["match"])
+def my_matches(
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Match authenticated company against ALL stored tenders. Returns ranked list.
+    Pure Python — no LLM, no cost per company.
+    """
+    company_row = _get_or_404(db, CompanyRow, auth.company_id, "חברה")
     company = CompanyProfile.model_validate_json(company_row.profile_json)
 
     tenders = db.query(TenderRow).all()
     if not tenders:
-        return {"company_id": company_id, "matches": []}
+        return {"company_id": auth.company_id, "matches": []}
 
     results = []
     for t in tenders:
@@ -223,7 +294,7 @@ def company_matches(company_id: str, db: Session = Depends(get_db)):
         })
 
     results.sort(key=lambda x: x["final_score"], reverse=True)
-    return {"company_id": company_id, "total": len(results), "matches": results}
+    return {"company_id": auth.company_id, "total": len(results), "matches": results}
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -236,7 +307,7 @@ def _get_or_404(db: Session, model, pk: str, label: str):
 
 
 def _dummy_company() -> CompanyProfile:
-    """Minimal profile needed to initialize PipelineState (not used in extraction)."""
+    """Minimal profile needed to initialize PipelineState during ingestion."""
     return CompanyProfile(
         company_name="__ingest__",
         company_reg_id="000000000",
