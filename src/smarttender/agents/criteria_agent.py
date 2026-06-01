@@ -14,7 +14,7 @@ from datetime import date
 from difflib import SequenceMatcher
 from typing import Callable, Optional
 
-from ..rag.chunking import chunk_document, extract_page_texts
+from ..rag.chunking import chunk_document, extract_page_texts_with_stats
 from ..schemas.tender import (
     CriteriaCategory,
     Operator,
@@ -140,13 +140,16 @@ class CriteriaAgent:
         every page is processed, so no criterion can be silently missed.
         """
         try:
-            pages = extract_page_texts(pdf_path)
+            pages, stats = extract_page_texts_with_stats(pdf_path)
             if not pages:
-                raise ValueError("לא חולץ טקסט (PDF סרוק?) — OCR לא מיושם ב-PoC")
+                raise ValueError(
+                    "לא חולץ טקסט — PDF סרוק ללא Tesseract? "
+                    "התקן: apt install tesseract-ocr tesseract-ocr-heb && pip install pytesseract pillow"
+                )
             chunks = chunk_document(pages, max_chars=max_chunk_chars, overlap_pages=overlap_pages)
             on_status(
                 f"כיסוי מלא: {len(pages)} עמודים → {len(chunks)} chunks "
-                f"(~{max_chunk_chars:,} תווים כ\"א, חפיפה {overlap_pages} עמ')"
+                f"({stats.summary()}, חפיפה {overlap_pages} עמ')"
             )
 
             outputs: list[TenderAnalysisOutput] = []
@@ -239,21 +242,17 @@ class CriteriaAgent:
 
     # ── steps ───────────────────────────────────────────────────────────────
     def _pdf_to_text(self, pdf_path: str, *, on_status: StatusFn) -> str:
-        import fitz  # PyMuPDF
-
         on_status(f"קורא PDF: {pdf_path}")
-        doc = fitz.open(pdf_path)
-        pages: list[str] = []
-        for i, page in enumerate(doc):
-            page_text = page.get_text("text").strip()
-            if page_text:
-                pages.append(f"[עמוד {i + 1}]\n{page_text}")
-        doc.close()
+        pages, stats = extract_page_texts_with_stats(pdf_path)
 
-        full_text = "\n\n".join(pages)
-        if not full_text.strip():
-            raise ValueError("לא חולץ טקסט (PDF סרוק?) — OCR לא מיושם ב-PoC")
-        on_status(f"חולצו {len(full_text):,} תווים מ-{len(pages)} עמודים")
+        if not pages:
+            raise ValueError(
+                "לא חולץ טקסט — PDF סרוק ללא Tesseract? "
+                "התקן: apt install tesseract-ocr tesseract-ocr-heb && pip install pytesseract pillow"
+            )
+
+        full_text = "\n\n".join(f"[עמוד {p}]\n{t}" for p, t in pages)
+        on_status(f"חולצו {len(full_text):,} תווים ({stats.summary()})")
         return full_text
 
     def _call_llm(self, text: str, *, on_status: StatusFn) -> TenderAnalysisOutput:
