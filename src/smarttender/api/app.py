@@ -10,12 +10,14 @@ Authentication: X-API-Key header (SHA-256 hashed at rest, shown plaintext once).
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from ..agents.criteria_agent import CriteriaAgent, resolve_model
@@ -45,6 +47,26 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# CORS — origins controlled by ALLOWED_ORIGINS env var (comma-separated).
+# Defaults to "*" for local dev; set a restrictive list in production.
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
+_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=_raw_origins != "*",
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── health ─────────────────────────────────────────────────────────────────────
+
+@app.get("/health", summary="בדיקת תקינות", tags=["system"], include_in_schema=True)
+def health():
+    """Returns 200 OK when the service is up. No authentication required."""
+    return {"status": "ok", "version": app.version}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
