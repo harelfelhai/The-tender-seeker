@@ -11,7 +11,7 @@ import json
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Float, String, Text, create_engine, text
+from sqlalchemy import Boolean, Column, Date, Float, String, Text, create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./smarttender.db")
@@ -70,6 +70,36 @@ class MatchResultRow(Base):
     final_score = Column(Float, nullable=True)
     report_json = Column(Text, nullable=False)      # full MatchReport + RelevanceReport JSON
     computed_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class RawTenderRow(Base):
+    """A tender record as received from a harvest source — before LLM analysis.
+
+    Lifecycle: DISCOVERED → PENDING_FILTER → PENDING_ANALYSIS → ANALYZED
+                                            ↘ REJECTED
+    Manual uploads enter at PENDING_ANALYSIS and are processed immediately.
+    """
+
+    __tablename__ = "raw_tenders"
+
+    id = Column(String, primary_key=True)       # internal UUID
+    source_id = Column(String, nullable=False, index=True)   # "budgetkey" | "manual" | ...
+    external_id = Column(String, nullable=True, index=True)  # ID in source system (dedup key)
+    title_he = Column(String, nullable=True)
+    publisher_he = Column(String, nullable=True)
+    subjects_json = Column(Text, nullable=True)             # JSON list of subject strings
+    tender_type = Column(String, nullable=True)             # "office"|"central"|"exemptions"
+    publication_date = Column(Date, nullable=True)
+    deadline = Column(Date, nullable=True)                  # submission deadline
+    estimated_budget_ils = Column(Float, nullable=True)
+    pdf_urls_json = Column(Text, nullable=True)             # JSON list of URL strings
+    pdf_blob = Column(Text, nullable=True)                  # base64 for manual uploads
+    uploaded_by = Column(String, nullable=True, index=True) # company_id (manual uploads)
+    status = Column(String, nullable=False, default="discovered", index=True)
+    analysis_id = Column(String, nullable=True)             # FK → tenders.id after analysis
+    raw_metadata_json = Column(Text, nullable=True)         # full API response
+    harvested_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+    analyzed_at = Column(String, nullable=True)
 
 
 def init_db() -> None:

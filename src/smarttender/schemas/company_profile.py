@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -92,4 +92,31 @@ class CompanyProfile(BaseModel):
     available_capacity_pct: Optional[float] = Field(
         default=None, ge=0, le=100,
         description="How much free capacity to take on new work (0-100)",
+    )
+
+    # ── harvest pre-filters ──────────────────────────────────────────────────
+    # Used to filter RAW tenders by metadata BEFORE LLM extraction (no PDF).
+    # A tender must match at least one active company's filters to be analyzed.
+    harvest_keywords: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Hebrew keywords matched against tender titles and subject tags from "
+            "source APIs. E.g. ['מיזוג אוויר', 'HVAC', 'מערכות קירור']. "
+            "Empty = no keyword filter (accept all)."
+        ),
+    )
+    preferred_tender_types: list[Literal["office", "central", "exemptions"]] = Field(
+        default_factory=list,
+        description=(
+            "BudgetKey tender types to track: 'office' (משרדי), 'central' (מרכזי), "
+            "'exemptions' (פטור ממכרז). Empty = all types."
+        ),
+    )
+    min_days_to_deadline: int = Field(
+        default=7,
+        ge=0,
+        description=(
+            "Ignore tenders whose submission deadline is fewer than this many days away. "
+            "Prevents wasting analysis cost on tenders the company can't realistically bid on."
+        ),
     )

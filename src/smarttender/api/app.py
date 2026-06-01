@@ -27,7 +27,11 @@ from ..match_engine.relevance import score_relevance
 from ..schemas.company_profile import CompanyProfile
 from ..schemas.tender import TenderAnalysisOutput
 from .auth import generate_key, hash_key, require_auth, require_company_access
-from .database import ApiKeyRow, CompanyRow, MatchResultRow, TenderRow, get_db, init_db
+from .database import ApiKeyRow, CompanyRow, MatchResultRow, RawTenderRow, TenderRow, get_db, init_db
+from ..harvest.base import TenderStatus
+from ..harvest.service import HarvestService
+from ..harvest.sources.budgetkey import BudgetKeySource
+from ..harvest.sources.manual import ManualSource
 
 
 # ── lifespan ──────────────────────────────────────────────────────────────────
@@ -319,7 +323,171 @@ def my_matches(
     return {"company_id": auth.company_id, "total": len(results), "matches": results}
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# /harvest  — source management and manual run trigger
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _harvest_service() -> HarvestService:
+    return HarvestService(sources=[BudgetKeySource(), ManualSource()])
+
+
+@app.get("/harvest/sources", summary="מקורות קצירה זמינים", tags=["harvest"])
+def list_harvest_sources(auth: ApiKeyRow = Depends(require_auth)):
+    svc = _harvest_service()
+    return {"sources": svc.list_sources()}
+
+
+@app.post("/harvest/run", summary="הפעל קצירה ידנית ממקור נבחר", tags=["harvest"])
+async def run_harvest(
+    source_id: str = "budgetkey",
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Fetch new tenders from the given source, apply the metadata filter,
+    and persist them to raw_tenders.  Does NOT run LLM extraction.
+    """
+    svc = _harvest_service()
+    try:
+        result = await svc.run_source(source_id, db)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "source_id": result.source_id,
+        "fetched": result.fetched,
+        "new": result.new,
+        "duplicates": result.duplicates,
+        "pending_analysis": result.pending_analysis,
+        "rejected": result.rejected,
+        "errors": result.errors,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# /raw-tenders  — inspect and trigger analysis of harvested records
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.get("/raw-tenders", summary="מכרזים שנקצרו (לפני ניתוח LLM)", tags=["harvest"])
+def list_raw_tenders(
+    status: str | None = None,
+    source_id: str | None = None,
+    limit: int = 50,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    q = db.query(RawTenderRow)
+    if status:
+        q = q.filter(RawTenderRow.status == status)
+    if source_id:
+        q = q.filter(RawTenderRow.source_id == source_id)
+    rows = q.order_by(RawTenderRow.harvested_at.desc()).limit(limit).all()
+    return [_raw_tender_summary(r) for r in rows]
+
+
+@app.get("/raw-tenders/{raw_id}", summary="פרטי רשומת raw tender", tags=["harvest"])
+def get_raw_tender(
+    raw_id: str,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    row = _get_or_404(db, RawTenderRow, raw_id, "raw tender")
+    d = _raw_tender_summary(row)
+    d["raw_metadata"] = json.loads(row.raw_metadata_json or "{}")
+    return d
+
+
+@app.post("/raw-tenders/{raw_id}/analyze", summary="הפעל ניתוח LLM על raw tender", tags=["harvest"])
+async def analyze_raw_tender(
+    raw_id: str,
+    model: str = "sonnet",
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Trigger LLM extraction for a single raw tender that has a PDF URL or blob.
+    Only tenders in PENDING_ANALYSIS or REJECTED status can be re-analyzed.
+    """
+    row = _get_or_404(db, RawTenderRow, raw_id, "raw tender")
+    if row.status == TenderStatus.ANALYZED.value:
+        raise HTTPException(400, "מכרז זה כבר נותח")
+
+    pdf_urls = json.loads(row.pdf_urls_json or "[]")
+    if not pdf_urls and not row.pdf_blob:
+        raise HTTPException(400, "אין קובץ PDF זמין לניתוח")
+
+    model_id = resolve_model(model)
+
+    # Download PDF from first available URL (or use stored blob)
+    import base64
+    if row.pdf_blob:
+        pdf_bytes = base64.b64decode(row.pdf_blob)
+    else:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.get(pdf_urls[0])
+                resp.raise_for_status()
+                pdf_bytes = resp.content
+        except Exception as exc:
+            raise HTTPException(502, f"לא ניתן להוריד את ה-PDF: {exc}")
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(pdf_bytes)
+        tmp_path = tmp.name
+
+    try:
+        agent = CriteriaAgent(model=model_id)
+        pipeline = TenderPipeline(criteria_agent=agent)
+        state = pipeline.node_extract_criteria(
+            PipelineState(company=_dummy_company(), pdf_path=tmp_path)
+        )
+        analysis: TenderAnalysisOutput = state.analysis
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    from datetime import datetime, timezone
+    tender_row = db.get(TenderRow, analysis.tender_id) or TenderRow(id=analysis.tender_id)
+    tender_row.title_he = analysis.title_he
+    tender_row.publisher_he = analysis.publisher_he
+    tender_row.source_pdf = pdf_urls[0] if pdf_urls else "manual"
+    tender_row.analysis_json = analysis.model_dump_json()
+    tender_row.model_used = model_id
+    db.add(tender_row)
+
+    row.status = TenderStatus.ANALYZED.value
+    row.analysis_id = analysis.tender_id
+    row.analyzed_at = datetime.now(timezone.utc).isoformat()
+    db.commit()
+
+    return {
+        "raw_tender_id": raw_id,
+        "tender_id": analysis.tender_id,
+        "title_he": analysis.title_he,
+        "criteria_count": len(analysis.criteria),
+        "model_used": model_id,
+    }
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _raw_tender_summary(r: RawTenderRow) -> dict:
+    return {
+        "id": r.id,
+        "source_id": r.source_id,
+        "external_id": r.external_id,
+        "title_he": r.title_he,
+        "publisher_he": r.publisher_he,
+        "subjects": json.loads(r.subjects_json or "[]"),
+        "tender_type": r.tender_type,
+        "publication_date": r.publication_date.isoformat() if r.publication_date else None,
+        "deadline": r.deadline.isoformat() if r.deadline else None,
+        "estimated_budget_ils": r.estimated_budget_ils,
+        "pdf_urls": json.loads(r.pdf_urls_json or "[]"),
+        "status": r.status,
+        "analysis_id": r.analysis_id,
+        "uploaded_by": r.uploaded_by,
+        "harvested_at": r.harvested_at,
+        "analyzed_at": r.analyzed_at,
+    }
+
 
 def _get_or_404(db: Session, model, pk: str, label: str):
     row = db.get(model, pk)
