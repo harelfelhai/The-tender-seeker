@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Dev / test
+tests/
+*.db
+.env
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# Data / uploads
+data/
+*.pdf
+
+# Docs
+*.md
+ARCHITECTURE.md
