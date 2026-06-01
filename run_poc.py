@@ -41,7 +41,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ── project imports ──────────────────────────────────────────────────────────
-from src.smarttender.agents.criteria_agent import CriteriaAgent
+from src.smarttender.agents.criteria_agent import CriteriaAgent, MODEL_ALIASES, resolve_model
 from src.smarttender.agents.graph import PipelineState, TenderPipeline
 from src.smarttender.eval.criteria_eval import EvalReport, evaluate_against_golden, load_golden
 from src.smarttender.eval.recall_audit import (
@@ -537,6 +537,14 @@ def main() -> None:
         action="store_true",
         help="Disable Anthropic prompt caching (useful for baseline cost comparison)",
     )
+    _alias_str = " | ".join(f"{k}={v}" for k, v in MODEL_ALIASES.items())
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="sonnet",
+        metavar="MODEL",
+        help=f"Model for extraction. Aliases: {_alias_str}. Or any full model ID. (default: sonnet)",
+    )
     args = parser.parse_args()
 
     console.rule("[bold blue]SmartTender AI — PoC Runner[/bold blue]")
@@ -556,10 +564,11 @@ def main() -> None:
         console.print(f"[dim cyan]·[/dim cyan] {msg}")
 
     use_cache = not args.no_cache
+    model_id = resolve_model(args.model)
     if args.pdf:
         cache_label = "[green]מופעל[/green]" if use_cache else "[yellow]מושבת (--no-cache)[/yellow]"
-        console.print(f"[dim]Prompt caching: {cache_label}[/dim]")
-    pipeline = TenderPipeline(criteria_agent=CriteriaAgent(use_cache=use_cache))
+        console.print(f"[dim]מודל: [bold]{model_id}[/bold]  |  Prompt caching: {cache_label}[/dim]")
+    pipeline = TenderPipeline(criteria_agent=CriteriaAgent(model=model_id, use_cache=use_cache))
     state = pipeline.node_extract_criteria(
         PipelineState(
             company=company,

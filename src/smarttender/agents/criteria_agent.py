@@ -26,6 +26,24 @@ from ..schemas.tender import (
 # A no-op status sink; callers (e.g. the CLI) can pass their own printer.
 StatusFn = Callable[[str], None]
 
+# Friendly aliases → full Anthropic model IDs.
+# Haiku for dev iteration (~12x cheaper than Opus), Sonnet for staging, Opus for production.
+MODEL_ALIASES: dict[str, str] = {
+    "haiku":  "claude-haiku-4-5-20251001",
+    "sonnet": "claude-sonnet-4-6",
+    "opus":   "claude-opus-4-8",
+}
+DEFAULT_MODEL = "claude-sonnet-4-6"
+
+
+def resolve_model(name: str) -> str:
+    """Accept a short alias or a full model ID; raise ValueError on unknown aliases."""
+    lower = name.lower()
+    if lower in MODEL_ALIASES:
+        return MODEL_ALIASES[lower]
+    # Accept any full model ID as-is (forward-compatible with future model names).
+    return name
+
 
 def _noop(_: str) -> None:  # pragma: no cover - trivial
     pass
@@ -64,13 +82,13 @@ class CriteriaAgent:
     def __init__(
         self,
         *,
-        model: str = "claude-opus-4-8",
+        model: str = DEFAULT_MODEL,
         api_key: Optional[str] = None,
         max_tokens: int = 8_192,
         max_chars: int = 80_000,
         use_cache: bool = True,
     ) -> None:
-        self.model = model
+        self.model = resolve_model(model)
         self.api_key = api_key
         self.max_tokens = max_tokens
         self.max_chars = max_chars
