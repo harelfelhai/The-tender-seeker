@@ -6,6 +6,7 @@ The routing function `evaluate()` is the single entry point used by the engine.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional
