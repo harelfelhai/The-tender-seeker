@@ -73,7 +73,31 @@ class MatchResultRow(Base):
 
 
 def init_db() -> None:
-    Base.metadata.create_all(bind=engine)
+    """Run Alembic migrations to head (idempotent, safe on existing DBs)."""
+    from alembic import command
+    from alembic.config import Config
+
+    ini_path = _find_alembic_ini()
+    if ini_path is None:
+        # Fallback for environments where alembic.ini is not present (e.g. tests)
+        Base.metadata.create_all(bind=engine)
+        return
+
+    cfg = Config(ini_path)
+    cfg.set_main_option("sqlalchemy.url", DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+
+def _find_alembic_ini() -> "str | None":
+    """Locate alembic.ini by searching from the package root upward."""
+    import pathlib
+
+    here = pathlib.Path(__file__).resolve()
+    for parent in here.parents:
+        candidate = parent / "alembic.ini"
+        if candidate.exists():
+            return str(candidate)
+    return None
 
 
 def get_db():

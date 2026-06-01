@@ -16,4 +16,5 @@ python-multipart>=0.0.9
 # test/dev only — generating the synthetic Hebrew sample tender PDF
 reportlab>=4.0
 python-bidi>=0.4
+alembic>=1.13
 pytest>=8.0
