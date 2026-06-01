@@ -90,10 +90,38 @@ export interface TenderMatchDetail extends TenderMatch {
   relevance_factors: RelevanceFactor[];
 }
 
+export interface ContractorClassification {
+  branch_code: string;
+  group_letter: string;
+  financial_tier: number;
+  valid_until: string | null;
+}
+
+export interface ExperienceRecord {
+  project_name: string;
+  client_type: string;
+  value_ils: number | null;
+  year: number;
+  domain_tags: string[];
+}
+
+export interface InsuranceCoverage {
+  insurance_type: string;
+  coverage_ils: number;
+  valid_until: string | null;
+}
+
 export interface CompanyProfile {
   company_name: string;
   company_reg_id: string | null;
   annual_revenues: Record<string, number>;
+  equity_ils: number | null;
+  contractor_classifications: ContractorClassification[];
+  certifications: string[];
+  experience_years: number;
+  similar_public_projects: ExperienceRecord[];
+  insurances: InsuranceCoverage[];
+  employees_count: number | null;
   domains: string[];
   operating_regions: string[];
   preferred_client_types: string[];
