@@ -1,0 +1,78 @@
+{
+  "_doc": "Ground-truth labels for data/raw/tender_cleaning_he.txt — Haifa municipality cleaning services tender. Hand-labeled against the synthetic text. Used by pytest -m eval and run_poc.py --eval.",
+  "source_text": "data/golden/tender_cleaning_he.txt",
+  "criteria": [
+    {
+      "category": "legal",
+      "field": "company_registered",
+      "operator": "exists",
+      "value": true,
+      "mandatory": true,
+      "description_he": "חברה רשומה כדין בישראל עם אישור ניהול ספרים בתוקף",
+      "key_terms": ["רשומה", "ניהול ספרים", "רשות המסים"]
+    },
+    {
+      "category": "experience",
+      "field": "similar_public_projects",
+      "operator": "count>=",
+      "value": 4,
+      "mandatory": true,
+      "description_he": "לפחות 4 חוזי ניקיון במבנים ציבוריים ב-5 השנים האחרונות, כל חוזה בהיקף 200,000 ש\"ח לשנה לפחות",
+      "key_terms": ["4 חוזים", "מבנים ציבוריים", "5 השנים", "200,000"]
+    },
+    {
+      "category": "personnel",
+      "field": "employees_count",
+      "operator": ">=",
+      "value": 30,
+      "mandatory": true,
+      "description_he": "לפחות 30 עובדים קבועים בתחום שירותי הניקיון",
+      "key_terms": ["30 עובדים", "קבועים", "ניקיון"]
+    },
+    {
+      "category": "financial",
+      "field": "annual_turnover_ils",
+      "operator": ">=",
+      "value": 4000000,
+      "mandatory": true,
+      "description_he": "מחזור כספי מצטבר בתחום ניקיון של לפחות 4,000,000 ש\"ח בשלוש שנים (2023-2025)",
+      "key_terms": ["מחזור", "4,000,000", "מצטבר", "3 שנים"]
+    },
+    {
+      "category": "insurance",
+      "field": "insurance_employer_liability",
+      "operator": ">=",
+      "value": 5000000,
+      "mandatory": true,
+      "description_he": "ביטוח אחריות מעבידים בסכום של לפחות 5,000,000 ש\"ח",
+      "key_terms": ["ביטוח", "מעבידים", "5,000,000"]
+    },
+    {
+      "category": "insurance",
+      "field": "insurance_third_party_liability",
+      "operator": ">=",
+      "value": 3000000,
+      "mandatory": true,
+      "description_he": "ביטוח אחריות כלפי צד שלישי בסכום של לפחות 3,000,000 ש\"ח",
+      "key_terms": ["ביטוח", "צד שלישי", "3,000,000"]
+    },
+    {
+      "category": "certification",
+      "field": "certifications",
+      "operator": "contains",
+      "value": "ניקיון מוסדי",
+      "mandatory": true,
+      "description_he": "תעודת הכשרה מקצועית לניהול שירותי ניקיון מוסדי ממשרד העבודה",
+      "key_terms": ["הכשרה", "ניקיון מוסדי", "משרד העבודה"]
+    },
+    {
+      "category": "certification",
+      "field": "certifications",
+      "operator": "contains",
+      "value": "ISO 14001",
+      "mandatory": false,
+      "description_he": "תקן ISO 14001 (ניהול סביבתי) — יתרון",
+      "key_terms": ["ISO 14001", "סביבתי", "יתרון"]
+    }
+  ]
+}

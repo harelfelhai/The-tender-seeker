@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+markers = [
+    "eval: end-to-end LLM extraction tests — requires ANTHROPIC_API_KEY and costs real tokens. Run with: pytest -m eval",
+]
