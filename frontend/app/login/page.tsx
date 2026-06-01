@@ -41,13 +41,14 @@ export default function LoginPage() {
               מפתח API
             </label>
             <input
-              type="password"
+              type="text"
               value={key}
               onChange={(e) => setKey(e.target.value)}
               placeholder="sk-st-..."
               className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               dir="ltr"
               autoComplete="off"
+              spellCheck={false}
             />
           </div>
 
