@@ -120,3 +120,13 @@ class CompanyProfile(BaseModel):
             "Prevents wasting analysis cost on tenders the company can't realistically bid on."
         ),
     )
+
+    # ── notifications ────────────────────────────────────────────────────────
+    notification_email: Optional[str] = Field(
+        default=None,
+        description="Email address to notify when a new matching tender is found.",
+    )
+    notification_enabled: bool = Field(
+        default=True,
+        description="Set to False to pause notifications without deleting the email.",
+    )

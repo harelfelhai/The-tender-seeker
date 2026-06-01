@@ -27,11 +27,14 @@ from ..match_engine.relevance import score_relevance
 from ..schemas.company_profile import CompanyProfile
 from ..schemas.tender import TenderAnalysisOutput
 from .auth import generate_key, hash_key, require_auth, require_company_access
-from .database import ApiKeyRow, CompanyRow, MatchResultRow, RawTenderRow, TenderRow, get_db, init_db
+from .database import ApiKeyRow, CompanyRow, MatchResultRow, NotificationRow, RawTenderRow, TenderRow, get_db, init_db
 from ..harvest.base import TenderStatus
 from ..harvest.service import HarvestService
 from ..harvest.sources.budgetkey import BudgetKeySource
 from ..harvest.sources.manual import ManualSource
+from ..notifications import ConsoleNotifier, EmailNotifier
+from ..notifications.dispatcher import NotificationDispatcher
+from ..scheduler import build_scheduler
 
 
 # ── lifespan ──────────────────────────────────────────────────────────────────
@@ -39,7 +42,39 @@ from ..harvest.sources.manual import ManualSource
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+
+    # Build notifiers: always log to console; email when SMTP_HOST is set
+    notifiers = [ConsoleNotifier()]
+    if os.getenv("SMTP_HOST"):
+        notifiers.append(EmailNotifier())
+    dispatcher = NotificationDispatcher(notifiers)
+
+    async def harvest_job() -> None:
+        """Run all sources, then notify companies about new matching tenders."""
+        from .database import SessionLocal, RawTenderRow
+        svc = HarvestService(sources=[BudgetKeySource()])
+        db = SessionLocal()
+        try:
+            results = await svc.run_all(db)
+            # Notify for every tender that just moved to PENDING_ANALYSIS
+            pending = (
+                db.query(RawTenderRow)
+                .filter(RawTenderRow.status == TenderStatus.PENDING_ANALYSIS.value)
+                .all()
+            )
+            for row in pending:
+                await dispatcher.dispatch_for_tender(row, db)
+        finally:
+            db.close()
+
+    scheduler = build_scheduler(harvest_job)
+    if scheduler:
+        scheduler.start()
+
     yield
+
+    if scheduler:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
@@ -329,6 +364,32 @@ def my_matches(
 
 def _harvest_service() -> HarvestService:
     return HarvestService(sources=[BudgetKeySource(), ManualSource()])
+
+
+@app.get("/notifications", summary="היסטוריית התראות של החברה שלי", tags=["harvest"])
+def my_notifications(
+    limit: int = 20,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(NotificationRow)
+        .filter(NotificationRow.company_id == auth.company_id)
+        .order_by(NotificationRow.sent_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "raw_tender_id": r.raw_tender_id,
+            "channel": r.channel,
+            "status": r.status,
+            "sent_at": r.sent_at,
+            "error_msg": r.error_msg,
+        }
+        for r in rows
+    ]
 
 
 @app.get("/harvest/sources", summary="מקורות קצירה זמינים", tags=["harvest"])

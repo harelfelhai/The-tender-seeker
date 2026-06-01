@@ -102,6 +102,21 @@ class RawTenderRow(Base):
     analyzed_at = Column(String, nullable=True)
 
 
+class NotificationRow(Base):
+    """Record of every notification sent — prevents duplicate sends."""
+
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True)
+    company_id = Column(String, nullable=False, index=True)
+    raw_tender_id = Column(String, nullable=False, index=True)
+    channel = Column(String, nullable=False)        # "email" | "console"
+    recipient = Column(String, nullable=True)       # email address
+    status = Column(String, nullable=False)         # "sent" | "failed"
+    error_msg = Column(String, nullable=True)
+    sent_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())
+
+
 def init_db() -> None:
     """Run Alembic migrations to head (idempotent, safe on existing DBs)."""
     from alembic import command
