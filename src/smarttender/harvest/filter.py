@@ -87,11 +87,20 @@ class BasicMetadataFilter:
             matched = any(t.lower() in search_text for t in taxonomy_terms)
 
         if not matched and company.domains:
-            for subject in raw.subjects:
-                implied = domains_for_subject(subject)
-                if any(d in company.domains for d in implied):
-                    matched = True
-                    break
+            # Subject-category match requires corroboration from the title.
+            # A broad category like "שירותי בנייה" covers thousands of unrelated
+            # tenders; we only accept it when the title also contains at least one
+            # domain term — reducing false positives without harming recall for
+            # tenders that mention HVAC explicitly.
+            title_lower = (raw.title_he or "").lower()
+            taxonomy_terms = terms_for_domains(list(company.domains))
+            title_has_domain_term = any(t.lower() in title_lower for t in taxonomy_terms)
+            if title_has_domain_term:
+                for subject in raw.subjects:
+                    implied = domains_for_subject(subject)
+                    if any(d in company.domains for d in implied):
+                        matched = True
+                        break
 
         if not matched:
             return False
