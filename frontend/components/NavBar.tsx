@@ -16,6 +16,8 @@ export default function NavBar({ companyName }: { companyName?: string }) {
   const links = [
     { href: "/dashboard", label: "מכרזים" },
     { href: "/profile", label: "פרופיל החברה" },
+    { href: "/raw-tenders", label: "מכרזים שנקצרו" },
+    { href: "/onboarding", label: "הגדרת פרופיל" },
   ];
 
   return (

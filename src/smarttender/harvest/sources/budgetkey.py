@@ -18,7 +18,7 @@ from ..base import RawTenderRecord
 log = logging.getLogger(__name__)
 
 _API_URL = "https://next.obudget.org/api/query"
-_PAGE_SIZE = 500
+_PAGE_SIZE = 5000
 
 # All tender types available in BudgetKey
 TENDER_TYPES = ("office", "central", "exemptions")
@@ -64,10 +64,11 @@ class BudgetKeySource:
     def _build_query(self, since: date) -> str:
         return (
             "SELECT publication_id, tender_id, tender_type, description, "
-            "publisher, publication_date, claim_date, volume, subjects, documents "
-            f"FROM tenders "
-            f"WHERE publication_date > '{since}' "
-            f"ORDER BY publication_date DESC "
+            "publisher, publisher_unit, page_url, "
+            "publication_date, last_update_date, claim_date, volume, subjects, documents "
+            f"FROM procurement_tenders_all "
+            f"WHERE last_update_date > '{since}' "
+            f"ORDER BY last_update_date DESC "
             f"LIMIT {self._page_size}"
         )
 
@@ -79,12 +80,14 @@ class BudgetKeySource:
             external_id=f"{row.get('tender_type', 'unknown')}_{row.get('publication_id', '')}",
             title_he=row.get("description") or "",
             publisher_he=row.get("publisher"),
+            publisher_unit=row.get("publisher_unit"),
             subjects=_parse_subjects(row.get("subjects")),
             tender_type=row.get("tender_type"),
-            publication_date=_parse_date(row.get("publication_date")),
+            publication_date=_parse_date(row.get("publication_date") or row.get("last_update_date")),
             deadline=_parse_date(row.get("claim_date")),
             estimated_budget_ils=_safe_float(row.get("volume")),
             pdf_urls=_parse_pdf_urls(row.get("documents")),
+            page_url=row.get("page_url"),
             raw_metadata=row,
         )
 

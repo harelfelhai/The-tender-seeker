@@ -27,11 +27,13 @@ from ..match_engine.relevance import score_relevance
 from ..schemas.company_profile import CompanyProfile
 from ..schemas.tender import TenderAnalysisOutput
 from .auth import generate_key, hash_key, require_auth, require_company_access
+from .onboarding import router as onboarding_router
 from .database import ApiKeyRow, CompanyRow, MatchResultRow, NotificationRow, RawTenderRow, TenderRow, get_db, init_db
 from ..harvest.base import TenderStatus
 from ..harvest.service import HarvestService
 from ..harvest.sources.budgetkey import BudgetKeySource
 from ..harvest.sources.manual import ManualSource
+from ..harvest.sources.muni import MuniTendersSource
 from ..notifications import ConsoleNotifier, EmailNotifier
 from ..notifications.dispatcher import NotificationDispatcher
 from ..scheduler import build_scheduler
@@ -91,6 +93,8 @@ app = FastAPI(
 # Defaults to "*" for local dev; set a restrictive list in production.
 _raw_origins = os.getenv("ALLOWED_ORIGINS", "*")
 _origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+app.include_router(onboarding_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -363,7 +367,7 @@ def my_matches(
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _harvest_service() -> HarvestService:
-    return HarvestService(sources=[BudgetKeySource(), ManualSource()])
+    return HarvestService(sources=[BudgetKeySource(), MuniTendersSource(), ManualSource()])
 
 
 @app.get("/notifications", summary="היסטוריית התראות של החברה שלי", tags=["harvest"])
@@ -420,6 +424,62 @@ async def run_harvest(
         "pending_analysis": result.pending_analysis,
         "rejected": result.rejected,
         "errors": result.errors,
+    }
+
+
+@app.post("/harvest/re-evaluate", summary="הפעל סינון מחדש על מכרזים שנדחו", tags=["harvest"])
+def re_evaluate_rejected(
+    limit: int = 2000,
+    auth: ApiKeyRow = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Re-run the current metadata filter on all REJECTED tenders.
+
+    Use after improving taxonomy.py or updating the company profile —
+    tenders that were previously rejected may now pass the improved filter.
+    Returns counts of tenders promoted to PENDING_ANALYSIS.
+    """
+    from ..harvest.filter import BasicMetadataFilter
+    from ..harvest.base import RawTenderRecord, TenderStatus as TS
+
+    company_row = db.query(CompanyRow).filter_by(id=auth.company_id).first()
+    if not company_row:
+        raise HTTPException(404, "פרופיל חברה לא נמצא")
+    company = CompanyProfile.model_validate_json(company_row.profile_json)
+    flt = BasicMetadataFilter()
+
+    rejected_rows = (
+        db.query(RawTenderRow)
+        .filter(RawTenderRow.status == TenderStatus.REJECTED.value)
+        .limit(limit)
+        .all()
+    )
+
+    promoted = 0
+    for row in rejected_rows:
+        rec = RawTenderRecord(
+            source_id=row.source_id,
+            external_id=row.external_id,
+            title_he=row.title_he or "",
+            publisher_he=row.publisher_he,
+            subjects=json.loads(row.subjects_json or "[]"),
+            tender_type=row.tender_type,
+            publication_date=None,
+            deadline=None,
+            estimated_budget_ils=row.estimated_budget_ils,
+            pdf_urls=json.loads(row.pdf_urls_json or "[]"),
+            page_url=row.page_url,
+            publisher_unit=row.publisher_unit,
+        )
+        if flt.should_analyze(rec, [company]):
+            row.status = TenderStatus.PENDING_ANALYSIS.value
+            promoted += 1
+
+    db.commit()
+    return {
+        "evaluated": len(rejected_rows),
+        "promoted_to_pending": promoted,
+        "still_rejected": len(rejected_rows) - promoted,
     }
 
 
@@ -542,6 +602,8 @@ def _raw_tender_summary(r: RawTenderRow) -> dict:
         "deadline": r.deadline.isoformat() if r.deadline else None,
         "estimated_budget_ils": r.estimated_budget_ils,
         "pdf_urls": json.loads(r.pdf_urls_json or "[]"),
+        "page_url": r.page_url,
+        "publisher_unit": r.publisher_unit,
         "status": r.status,
         "analysis_id": r.analysis_id,
         "uploaded_by": r.uploaded_by,

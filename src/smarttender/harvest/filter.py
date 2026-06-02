@@ -16,6 +16,7 @@ from typing import Protocol, runtime_checkable
 
 from ..schemas.company_profile import CompanyProfile
 from .base import RawTenderRecord
+from .taxonomy import NEGATIVE_PATTERNS, domains_for_subject, terms_for_domains
 
 
 @runtime_checkable
@@ -66,13 +67,34 @@ class BasicMetadataFilter:
             if raw.tender_type not in company.preferred_tender_types:
                 return False
 
-        # 4. Keyword match — title + subjects must contain at least one keyword
+        search_text = " ".join(filter(None, [raw.title_he, *raw.subjects])).lower()
+
+        # 4. Negative patterns — system-level rejection regardless of keywords
+        if any(neg.lower() in search_text for neg in NEGATIVE_PATTERNS):
+            return False
+
+        # 5. Relevance match — at least one of the following must hit:
+        #    a) user-defined harvest_keywords
+        #    b) taxonomy terms derived from company domains (system-defined)
+        #    c) BudgetKey subject category mapped to a company domain
+        matched = False
+
         if company.harvest_keywords:
-            search_text = " ".join(
-                filter(None, [raw.title_he, *raw.subjects])
-            ).lower()
-            if not any(kw.lower() in search_text for kw in company.harvest_keywords):
-                return False
+            matched = any(kw.lower() in search_text for kw in company.harvest_keywords)
+
+        if not matched and company.domains:
+            taxonomy_terms = terms_for_domains(list(company.domains))
+            matched = any(t.lower() in search_text for t in taxonomy_terms)
+
+        if not matched and company.domains:
+            for subject in raw.subjects:
+                implied = domains_for_subject(subject)
+                if any(d in company.domains for d in implied):
+                    matched = True
+                    break
+
+        if not matched:
+            return False
 
         return True
 

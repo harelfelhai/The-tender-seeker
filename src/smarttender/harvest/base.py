@@ -39,6 +39,8 @@ class RawTenderRecord:
     pdf_urls: list[str] = field(default_factory=list)
     pdf_blob: Optional[bytes] = None        # populated by ManualSource
     uploaded_by: Optional[str] = None       # company_id — manual uploads only
+    page_url: Optional[str] = None          # direct link to tender page
+    publisher_unit: Optional[str] = None    # sub-unit within the publisher
     raw_metadata: dict = field(default_factory=dict)
 
 

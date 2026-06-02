@@ -95,6 +95,8 @@ class RawTenderRow(Base):
     pdf_urls_json = Column(Text, nullable=True)             # JSON list of URL strings
     pdf_blob = Column(Text, nullable=True)                  # base64 for manual uploads
     uploaded_by = Column(String, nullable=True, index=True) # company_id (manual uploads)
+    page_url = Column(String, nullable=True)                # direct link to tender page
+    publisher_unit = Column(String, nullable=True)          # sub-unit within publisher
     status = Column(String, nullable=False, default="discovered", index=True)
     analysis_id = Column(String, nullable=True)             # FK → tenders.id after analysis
     raw_metadata_json = Column(Text, nullable=True)         # full API response

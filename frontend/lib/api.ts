@@ -135,6 +135,79 @@ export interface CompanyProfile {
   [key: string]: unknown;
 }
 
+export interface RawTender {
+  id: string;
+  source_id: string;
+  external_id: string;
+  title_he: string;
+  publisher_he: string | null;
+  subjects: string[];
+  tender_type: string | null;
+  publication_date: string | null;
+  deadline: string | null;
+  estimated_budget_ils: number | null;
+  pdf_urls: string[];
+  status: "PENDING_ANALYSIS" | "ANALYZED" | "REJECTED" | "ERROR" | "pending_analysis" | "analyzed" | "rejected" | "error";
+  analysis_id: string | null;
+  uploaded_by: string | null;
+  harvested_at: string | null;
+  analyzed_at: string | null;
+}
+
+export interface HarvestResult {
+  source_id: string;
+  fetched: number;
+  new: number;
+  duplicates: number;
+  pending_analysis: number;
+  rejected: number;
+  errors: number;
+}
+
+export interface InterviewSuggestions {
+  suggested_domains: string[];
+  suggested_keywords: string[];
+  suggested_regions: string[];
+  suggested_client_types: string[];
+  suggested_negatives: string[];
+  summary_he: string;
+}
+
+export interface InterviewResponse {
+  done: boolean;
+  next_question: string | null;
+  question_index: number | null;
+  total_questions: number;
+  suggestions: InterviewSuggestions | null;
+}
+
+export interface SampleTender {
+  id: string;
+  title_he: string;
+  publisher_he: string | null;
+  subjects: string[];
+  tender_type: string | null;
+  estimated_budget_ils: number | null;
+  deadline: string | null;
+  filter_passed: boolean;
+}
+
+export interface ProfileDiff {
+  add_domains: string[];
+  remove_domains: string[];
+  add_keywords: string[];
+  remove_keywords: string[];
+  add_negative_patterns: string[];
+  add_regions: string[];
+  add_client_types: string[];
+  explanation_he: string;
+}
+
+export interface FeedbackResponse {
+  diff: ProfileDiff;
+  summary_he: string;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -147,4 +220,36 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(profile),
     }),
+  rawTenders: (status?: string, limit = 200) =>
+    request<RawTender[]>(
+      `/raw-tenders?limit=${limit}${status ? `&status=${status}` : ""}`
+    ),
+  triggerHarvest: (sourceId = "budgetkey") =>
+    request<HarvestResult>(`/harvest/run?source_id=${sourceId}`, {
+      method: "POST",
+    }),
+  onboarding: {
+    interviewStep: (answers: { question: string; answer: string }[]) =>
+      request<InterviewResponse>("/onboarding/interview", {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      }),
+    getSamples: (limit = 15) =>
+      request<SampleTender[]>(`/onboarding/samples?limit=${limit}`),
+    analyzeFeedback: (
+      feedbacks: {
+        raw_tender_id: string;
+        title: string;
+        publisher: string | null;
+        subjects: string[];
+        budget_ils: number | null;
+        relevant: boolean;
+        reason: string;
+      }[]
+    ) =>
+      request<FeedbackResponse>("/onboarding/analyze-feedback", {
+        method: "POST",
+        body: JSON.stringify({ feedbacks }),
+      }),
+  },
 };
