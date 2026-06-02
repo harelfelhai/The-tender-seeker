@@ -539,7 +539,21 @@ def apply_suggestions(yes: bool = False) -> None:
         if p.lower() not in existing_neg_lower
     ]
 
-    total_new = sum(len(v) for v in new_terms.values()) + len(new_subjects) + len(new_negatives)
+    # Removals
+    remove_terms: dict[str, list[str]] = {}
+    for domain, terms in suggestions.get("taxonomy_removals", {}).items():
+        existing = domain_terms.get(domain, [])
+        existing_lower = {t.lower(): t for t in existing}
+        to_remove = [existing_lower[t.lower()] for t in terms if t.lower() in existing_lower]
+        if to_remove:
+            remove_terms[domain] = to_remove
+
+    total_new = (
+        sum(len(v) for v in new_terms.values())
+        + len(new_subjects)
+        + len(new_negatives)
+        + sum(len(v) for v in remove_terms.values())
+    )
     if total_new == 0:
         print("אין שינויים חדשים — כל ההצעות כבר קיימות ב-taxonomy.py")
         return
@@ -550,6 +564,10 @@ def apply_suggestions(yes: bool = False) -> None:
         print("+ מונחים חדשים לתחומים:")
         for domain, terms in new_terms.items():
             print(f"  [{domain}] +{len(terms)} מונחים: {terms}")
+    if remove_terms:
+        print("\n- מונחים להסרה (רחבים מדי / גורמים ל-FP):")
+        for domain, terms in remove_terms.items():
+            print(f"  [{domain}] -{len(terms)}: {terms}")
     if new_subjects:
         print("\n+ subject mappings חדשים:")
         for subj, domains in new_subjects.items():
@@ -559,7 +577,7 @@ def apply_suggestions(yes: bool = False) -> None:
         for p in new_negatives:
             print(f"  '{p}'")
 
-    print(f"\nסה״כ שינויים חדשים: {total_new}")
+    print(f"\nסה״כ שינויים: {total_new}")
 
     if not yes:
         try:
@@ -570,7 +588,7 @@ def apply_suggestions(yes: bool = False) -> None:
             print("בוטל.")
             return
 
-    # Merge
+    # Apply additions
     for domain, terms in new_terms.items():
         if domain not in domain_terms:
             domain_terms[domain] = terms
@@ -578,6 +596,11 @@ def apply_suggestions(yes: bool = False) -> None:
             domain_terms[domain].extend(terms)
     subject_map.update(new_subjects)
     negative_patterns.extend(new_negatives)
+
+    # Apply removals
+    for domain, terms in remove_terms.items():
+        remove_lower = {t.lower() for t in terms}
+        domain_terms[domain] = [t for t in domain_terms[domain] if t.lower() not in remove_lower]
 
     # Write updated taxonomy.py
     _write_taxonomy(domain_terms, subject_map, negative_patterns)
