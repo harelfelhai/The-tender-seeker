@@ -1,0 +1,138 @@
+{
+  "run_ts": "2026-06-02T09-57-11",
+  "company": "עתיד מיזוג אוויר בע\"מ",
+  "metrics": {
+    "tp": 8,
+    "fp": 3,
+    "fn": 14,
+    "tn": 975,
+    "precision": 0.727,
+    "recall": 0.364,
+    "f1": 0.485,
+    "llm_relevant_total": 22,
+    "filter_passed_total": 11
+  },
+  "false_positives": [
+    {
+      "title": "תעשיות בית אל זכרון יעקב בעמ - בדיקת שנתית למערכות סינון אב\"כ",
+      "filter_decision": "pending",
+      "relevant": false,
+      "confidence": "high",
+      "reason_he": "בדיקת מערכות סינון אב\"כ (פינוי עשן) - לא ברור שזה בתחום ליבה של החברה, בדיקות בלבד ללא התקנה/תיקון"
+    },
+    {
+      "title": "תחזוקה, שירות, חלפים, ביקורות לפי דרישות כבאות למערכת גילוי וכיבוי אש המותקנות ברחבי המרכז הרפואי",
+      "filter_decision": "pending",
+      "relevant": false,
+      "confidence": "high",
+      "reason_he": "מערכות גילוי וכיבוי אש - בטיחות אש, לא קשור למיזוג אויר או קירור"
+    },
+    {
+      "title": "תעשיות בית אל זכרון יעקב בעמ - בדיקת שנתית למערכות סינון אב\"כ",
+      "filter_decision": "pending",
+      "relevant": false,
+      "confidence": "high",
+      "reason_he": "בדיקת מערכות סינון אב\"כ - לא ברור שזה בתחום ליבה של החברה, בדיקות בלבד ללא התקנה/תיקון"
+    }
+  ],
+  "false_negatives": [
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש שירותי מיזוג אויר וקירור, אך תקציב לא ידוע ודוגיות משתנות"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש שירותי HVAC, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים להכיל מערכות מיזוג אויר וקירור, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש שירותי HVAC, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים להכיל מערכות קירור ומיזוג אויר, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש מערכות HVAC, אך תקציב לא ידוע"
+    },
+    {
+      "title": "חוזה שירות לטיפול במים במערכת CQM",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "חוזה שירות למערכת CQM בבית חולים - עשוי להיות קשור לתחזוקת מערכות מכניות/אוורור"
+    },
+    {
+      "title": "תחזוקת מערכות ספרינקלרים רטובה ויבשה",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "תחזוקת מערכות ספרינקלרים - מערכות מכניות בבניין חשוב, קרוב לתחום HVAC"
+    },
+    {
+      "title": "תחזוקת מערכות אויר רפואי",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "תחזוקת מערכות אויר רפואי - קשור ישירות לתחום אוורור וקירור, בתחום תקציב"
+    },
+    {
+      "title": "הגשת בקשות לסיוע בגיבוש תכנית פעולה למעבר לאנרגיה מקיימת ברשויות מקומיות (\"המאיץ\") מחזור מס' 4",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "כלול 'מיזוג אוויר' בתוך רשימת הנושאים הנרחבת, אנרגיה מקיימת רלוונטית"
+    },
+    {
+      "title": "עבודות אחזקה עבור מערכות הכלרה למים חמים",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "עבודות אחזקה למערכות כלרה למים חמים - קשור לאינסטלציה ותחזוקת מערכות מכניות, הייתכן שקשור למערכות חום וקירור"
+    },
+    {
+      "title": "שירותי תחזוקה תפעול וניהול לרבות ניקיון גינון והדברה במתקני משטרה באזורים דרום ש\"י צפון וחוף",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "שירותי תחזוקה וניהול במתקני משטרה כולל הדברה - עשוי לכלול תחזוקת מערכות מכניות ופינוי עשן"
+    },
+    {
+      "title": "התקשרות עם חברת אור רויאל כספק יחיד לקבלת שירותי משרד בבית אהרון",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "שירותי משרד ותחזוקה בבנין - עשוי לכלול שירותי אחזוקה של מערכות מכניות כולל מיזוג אויר"
+    },
+    {
+      "title": "שירות למערכת סינון אויר",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "שירות סינון אויר - קשור ישירות לאוורור וסינון אויר, תחום עיסוקי של החברה"
+    }
+  ]
+}

@@ -1,0 +1,251 @@
+# SmartTender AI — Project Memory
+
+## מה זה
+
+SaaS B2B לשוק הישראלי שמאפשר לחברות קבלן/שירותים לעקוב אחרי מכרזים ממשלתיים ועירוניים.
+הלופ המרכזי: קצירת מכרזים (BudgetKey API) → סינון מטה-דאטה → חילוץ קריטריונים ב-LLM → מנוע התאמה → dashboard + התראות אימייל.
+
+---
+
+## עקרונות מנחים
+
+1. **דיוק חילוץ לפני UI.** כל ערך המוצר קורס אם לא מחלצים תנאי סף בצורה מהימנה. מדדים (P/R/F1) על golden set — לא "תחושת בטן".
+2. **עברית/RTL — בעיה ראשונית, לא afterthought.** חילוץ PDF נאיבי הופך סדר מילים RTL ומגלב טבלאות. PyMuPDF + Tesseract `heb+eng` + `--psm 6`.
+3. **Structured > Semantic.** סף ("מחזור ≥ 5M ₪ ב-3 שנים") הופך ל-predicate מכין-להשוואה — לא פסקה ל-RAG. מנוע ההתאמה דטרמיניסטי; ה-LLM רק ממלא את הסכמה.
+4. **Eval harness — השתמש בו תמיד.** Golden JSONs + pytest -m eval. כל שינוי בפרומפט או בסכמה — מדוד לפני שמחליטים שהשתפר.
+
+---
+
+## סיכונים ידועים
+
+| סיכון | מיטיגציה |
+|---|---|
+| הפיכת RTL ופגיעה בטבלאות | PyMuPDF; table-aware chunking; S1 fidelity gate |
+| LLM ממציא ערכי סף | schema enforced (instructor), ציטוטים חובה, `needs_review` flag, מנוע דטרמיניסטי |
+| PDFs סרוקים באיכות נמוכה | Tesseract `heb+eng` fallback; `ExtractionStats.scan_ratio` לסימון דפים |
+| סמנטיקה ישראלית-ספציפית (סיווג קבלני, מחזור) | מודל מפורש בסכמה + `operators.py` עם unit tests — לא משאירים ל-LLM |
+| נסיגה בדיוק החילוץ | golden set + `pytest -m eval` ב-CI על כל שינוי פרומפט/סכמה |
+
+---
+
+## מצב נוכחי — מה בנוי (100%)
+
+| רכיב | קובץ/ים ראשיים | סטטוס |
+|---|---|---|
+| OCR pipeline | `src/smarttender/rag/chunking.py` | ✅ |
+| Criteria extraction (LLM) | `src/smarttender/agents/criteria_agent.py` | ✅ |
+| Pipeline orchestration | `src/smarttender/agents/graph.py` | ✅ |
+| Match engine (eligibility) | `src/smarttender/match_engine/engine.py` | ✅ |
+| Relevance scoring | `src/smarttender/match_engine/relevance.py` | ✅ |
+| FastAPI layer | `src/smarttender/api/app.py` | ✅ |
+| SQLAlchemy models | `src/smarttender/api/database.py` | ✅ |
+| Alembic migrations | `migrations/` | ✅ |
+| BudgetKey harvest | `src/smarttender/harvest/sources/budgetkey.py` | ✅ |
+| Harvest service + filter | `src/smarttender/harvest/service.py`, `filter.py` | ✅ |
+| APScheduler (harvest) | `src/smarttender/scheduler.py` | ✅ |
+| Email notifications | `src/smarttender/notifications/` | ✅ |
+| Docker Compose | `Dockerfile`, `docker-compose.yml` | ✅ |
+| Frontend (Next.js 16) | `frontend/` | ✅ |
+| Eval harness | `tests/eval_llm/`, `data/golden/` | ✅ |
+| 252 unit tests | `tests/` | ✅ |
+
+---
+
+## Tech Stack
+
+### Backend
+- Python 3.11
+- FastAPI + uvicorn
+- SQLAlchemy 2.0 (SQLite — `/data/smarttender.db`)
+- Alembic migrations (`render_as_batch=True` for SQLite ALTER)
+- instructor + anthropic — structured LLM extraction
+- APScheduler — harvest every N hours (`HARVEST_INTERVAL_HOURS`, default 6)
+- aiosmtplib — async email
+- PyMuPDF + pytesseract — OCR
+
+### Frontend
+- Next.js 16 + React 19 + TypeScript
+- Tailwind CSS 4
+- App Router, RTL Hebrew (`lang="he" dir="rtl"`)
+- No state management library — useState + fetch
+
+---
+
+## מבנה קבצים חשוב
+
+```
+src/smarttender/
+├── agents/
+│   ├── criteria_agent.py     # LLM extraction (instructor), mock fallback
+│   └── graph.py              # PipelineState + TenderPipeline (extract→match→relevance)
+├── api/
+│   ├── app.py                # FastAPI app, all endpoints, lifespan
+│   ├── auth.py               # API key (sk-st-{32hex}), SHA-256 at rest
+│   └── database.py           # SQLAlchemy models: CompanyRow, TenderRow, MatchResultRow,
+│                             #   RawTenderRow, NotificationRow, ApiKeyRow
+├── eval/
+│   ├── criteria_eval.py      # P/R/F1 against golden JSON
+│   ├── recall_audit.py       # Heuristic + LLM second-model recall audit
+│   └── verify.py             # Citation grounding (quote vs. source PDF)
+├── harvest/
+│   ├── base.py               # TenderStatus, RawTenderRecord, TenderSource protocol
+│   ├── filter.py             # BasicMetadataFilter, AcceptAllFilter
+│   ├── service.py            # HarvestService.run_all/run_source + dedup
+│   └── sources/
+│       ├── budgetkey.py      # BudgetKeySource — free SQL API (191K+ tenders)
+│       └── manual.py         # ManualSource.make_record() for uploads
+├── match_engine/
+│   ├── operators.py          # evaluate_predicate() per Operator type
+│   ├── engine.py             # evaluate_match(company, analysis) → MatchReport
+│   └── relevance.py          # score_relevance(company, tender_profile) → RelevanceReport
+├── notifications/
+│   ├── base.py               # NotificationEvent, Notifier protocol
+│   ├── dispatcher.py         # NotificationDispatcher — dedup + filter + send
+│   └── email_notifier.py     # aiosmtplib HTML+plaintext Hebrew email
+├── rag/
+│   └── chunking.py           # extract_page_texts, chunk_document, ExtractionStats
+├── schemas/
+│   ├── company_profile.py    # CompanyProfile (see below)
+│   ├── tender.py             # TenderAnalysisOutput, TenderCriteriaPredicate, Operator
+│   ├── match.py              # MatchReport, CriterionResult
+│   └── relevance.py          # RelevanceReport, RelevanceFactor
+└── scheduler.py              # build_scheduler(harvest_job)
+
+frontend/
+├── lib/api.ts                # Typed API client + getApiKey/setApiKey/clearApiKey
+├── components/NavBar.tsx     # Dashboard + Profile links, logout
+└── app/
+    ├── layout.tsx            # RTL layout
+    ├── page.tsx              # Redirect → dashboard or login
+    ├── login/page.tsx        # API key form
+    ├── dashboard/page.tsx    # Ranked tender list (eligible / ineligible)
+    ├── profile/page.tsx      # Company profile editor (harvest filters + notifications)
+    └── tender/[id]/page.tsx  # Tender detail (criteria, relevance factors)
+
+data/
+├── golden/
+│   ├── sample_tender_he.criteria.json   # HVAC tender golden (6 criteria)
+│   ├── tender_cleaning_he.criteria.json # Cleaning tender golden (8 criteria)
+│   └── tender_cleaning_he.txt           # Cleaning tender text fixture
+└── raw/
+    └── sample_tender_he.pdf             # HVAC tender PDF (generated by scripts/)
+```
+
+---
+
+## CompanyProfile — שני חלקים (חשוב!)
+
+### חלק א׳ — כשירות (eligibility) — **חסר מהפרונטאנד**
+```python
+annual_revenues: dict[int, float]          # {2023: 4_200_000, ...}
+equity_ils: Optional[float]
+contractor_classifications: list[ContractorClassification]
+  # ContractorClassification: branch_code, group_letter (א-ה), financial_tier (1-5), valid_until
+certifications: list[str]                  # ["ISO 9001", "ISO 14001"]
+experience_years: int
+similar_public_projects: list[ExperienceRecord]
+  # ExperienceRecord: project_name, client_type, value_ils, year, domain_tags
+insurances: list[InsuranceCoverage]
+  # InsuranceCoverage: insurance_type, coverage_ils, valid_until
+employees_count: Optional[int]
+```
+
+### חלק ב׳ — רלוונטיות + harvest (קיים בפרונטאנד)
+```python
+operating_regions, domains, min/max_project_value_ils
+preferred_client_types, available_capacity_pct
+harvest_keywords, preferred_tender_types, min_days_to_deadline
+notification_email, notification_enabled
+```
+
+**הבעיה:** דף הפרופיל הנוכחי (`frontend/app/profile/page.tsx`) מכסה רק חלק ב׳.
+בלי חלק א׳ — מנוע ההתאמה תמיד מחזיר "לא כשיר".
+
+---
+
+## API Endpoints (FastAPI)
+
+```
+POST /auth/register          → {company_id, api_key}
+GET  /auth/me                → {company_id, company_name}
+
+POST /tenders/ingest         → analyze PDF immediately (manual upload)
+GET  /tenders                → list tenders for this company
+GET  /tenders/{id}           → tender detail
+
+GET  /match                  → MatchAllResponse (all matches for company)
+GET  /match/{tender_id}      → TenderMatchDetail (criteria breakdown)
+
+GET  /companies/me           → CompanyProfile
+PUT  /companies/me           → update CompanyProfile
+
+GET  /notifications          → list sent notifications
+GET  /harvest/sources        → list active sources
+POST /harvest/run            → trigger manual harvest run
+GET  /raw-tenders            → list raw tenders (pre-analysis)
+GET  /raw-tenders/{id}       → raw tender detail
+POST /raw-tenders/{id}/analyze → trigger analysis for one raw tender
+
+GET  /health                 → {status: "ok"} (no auth)
+```
+
+---
+
+## Auth
+- API key format: `sk-st-{32 hex chars}`
+- Stored as SHA-256 hash in DB
+- Shown plaintext once at registration
+- Every request requires `X-API-Key` header (except `/health`)
+
+---
+
+## Operators (match engine)
+```python
+>=  <=  ==  contains  satisfies_classification  exists  count>=
+```
+
+`satisfies_classification` compares `{branch_code, min_group_letter, min_financial_tier}` against `ContractorClassification` list.
+
+---
+
+## BudgetKey Source
+- URL: `https://next.obudget.org/api/query`
+- Free SQL API, 191K+ Israeli gov tenders
+- `source_id = "budgetkey"`
+- Dedup by `(source_id, external_id)`
+- Fields: description, publisher, claim_date, volume, subjects, documents
+
+---
+
+## Eval Harness
+```bash
+pytest -m eval                  # runs LLM tests (~$0.01-0.02 on Haiku)
+pytest -m "not eval"            # standard CI (252 tests, zero API calls)
+pytest tests/eval_llm/test_extraction_golden.py::test_golden_files_are_valid  # always safe
+```
+Thresholds: recall ≥ 0.70, precision ≥ 0.60, F1 ≥ 0.65, mandatory recall ≥ 0.75
+
+---
+
+## Env Vars
+```bash
+ANTHROPIC_API_KEY         # required for LLM extraction
+DATABASE_URL              # default: sqlite:///./smarttender.db
+ALLOWED_ORIGINS           # CORS, default: *
+HARVEST_ENABLED           # default: true
+HARVEST_INTERVAL_HOURS    # default: 6
+SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM_EMAIL / SMTP_USE_TLS
+```
+
+---
+
+## Git
+- Repo: `harelfelhai/The-tender-seeker`
+- Active branch: `claude/zealous-heisenberg-30hwu`
+- PR #1 (draft): covers all work to date
+- Main branch: `main`
+
+---
+
+## הצעד הבא
+השלמת פרופיל הכשירות בפרונטאנד — ראה `NEXT_STEP_PROMPT.md`

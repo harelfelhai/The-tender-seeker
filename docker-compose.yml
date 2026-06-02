@@ -1,0 +1,24 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - db_data:/data
+    environment:
+      # Required: set your Anthropic API key here or in a .env file
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      DATABASE_URL: sqlite:////data/smarttender.db
+      # Comma-separated list of allowed CORS origins (default: * for local dev)
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  db_data:

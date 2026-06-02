@@ -1,0 +1,15 @@
+{
+  "_doc": "TEMPLATE — copy to <tender_name>.criteria.json and hand-label the GROUND-TRUTH תנאי סף for a real tender. You pay this labeling cost ONCE per document; thereafter every prompt/code change is scored against it (precision/recall/F1) automatically. Run:  python run_poc.py --pdf <pdf> --eval data/golden/<tender_name>.criteria.json",
+  "source_pdf": "data/raw/<your_tender>.pdf",
+  "criteria": [
+    {
+      "category": "financial | classification | experience | certification | insurance | legal | personnel | other",
+      "field": "machine field, e.g. annual_turnover_ils | contractor_classification | similar_public_projects | certifications | insurance_third_party_liability",
+      "operator": ">= | <= | == | contains | satisfies_classification | exists | count>=",
+      "value": "required value (number, string, or object for classification)",
+      "mandatory": true,
+      "description_he": "תיאור מילולי של תנאי הסף בעברית",
+      "key_terms": ["מילות", "מפתח", "לזיהוי"]
+    }
+  ]
+}
