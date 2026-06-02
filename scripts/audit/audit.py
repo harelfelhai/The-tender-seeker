@@ -7,12 +7,16 @@ The LLM acts as the "teacher" (ground truth). Each run:
   3. Saves timestamped labels to data/labels/ for trend tracking
   4. Optionally suggests system-level improvements (taxonomy.py / filter.py)
 
+Learning loop (knowledge distillation):
+  Audit → suggestions → --apply → updated taxonomy.py → re-evaluate DB → next audit
+
 Usage:
-    python scripts/audit/audit.py                  # full audit + metrics
-    python scripts/audit/audit.py --fp-only        # only false positive check
-    python scripts/audit/audit.py --fn-only        # only false negative check
-    python scripts/audit/audit.py --suggest        # also suggest system improvements
-    python scripts/audit/audit.py --history        # show metrics trend across past runs
+    python -X utf8 scripts/audit/audit.py                    # full audit + metrics
+    python -X utf8 scripts/audit/audit.py --suggest          # + suggest improvements
+    python -X utf8 scripts/audit/audit.py --apply            # apply saved suggestions to taxonomy.py
+    python -X utf8 scripts/audit/audit.py --apply --yes      # apply without interactive prompt
+    python -X utf8 scripts/audit/audit.py --suggest --apply  # suggest + immediately apply
+    python -X utf8 scripts/audit/audit.py --history          # show P/R trend across runs
 
 Cost: ~$0.0001 per tender on Haiku. 1000 tenders ≈ $0.10.
 """
@@ -365,6 +369,232 @@ False negatives (15 ראשונים):
     print(f"  נשמר: {out}")
 
 
+# ── apply suggestions → taxonomy.py (learning loop) ──────────────────────────
+
+TAXONOMY_PATH = ROOT / "src" / "smarttender" / "harvest" / "taxonomy.py"
+
+
+def _write_taxonomy(
+    domain_terms: dict[str, list[str]],
+    subject_map: dict[str, list[str]],
+    negative_patterns: list[str],
+) -> None:
+    """Regenerate taxonomy.py from merged data structures."""
+
+    def _esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace('"', '\\"')
+
+    def _repr_list(items: list[str], indent: int) -> str:
+        pad = " " * indent
+        inner = " " * (indent + 4)
+        if not items:
+            return "[]"
+        lines = ", ".join(f'"{_esc(t)}"' for t in items)
+        # Single line if short enough
+        if len(lines) + indent < 100:
+            return f"[{lines}]"
+        # Multi-line
+        item_lines = "\n".join(f'{inner}"{_esc(t)}",' for t in items)
+        return f"[\n{item_lines}\n{pad}]"
+
+    # DOMAIN_TERMS block
+    dt_parts = []
+    for domain, terms in domain_terms.items():
+        dt_parts.append(f'    "{domain}": {_repr_list(terms, 4)},')
+
+    # SUBJECT_DOMAIN_MAP block
+    sm_parts = []
+    for subj, domains in subject_map.items():
+        dom_str = "[" + ", ".join(f'"{_esc(d)}"' for d in domains) + "]"
+        sm_parts.append(f'    "{_esc(subj)}": {dom_str},')
+
+    # NEGATIVE_PATTERNS block
+    np_parts = [f'    "{_esc(p)}",' for p in negative_patterns]
+
+    content = (
+        '"""Domain taxonomy for harvest filtering.\n'
+        "\n"
+        "Maps company domains to known related terms (DOMAIN_TERMS),\n"
+        "BudgetKey subject categories to domains (SUBJECT_DOMAIN_MAP),\n"
+        "and lists system-wide exclusion patterns (NEGATIVE_PATTERNS).\n"
+        "\n"
+        "This file is automatically updated by:\n"
+        "  python -X utf8 scripts/audit/audit.py --suggest --apply\n"
+        '"""\n'
+        "from __future__ import annotations\n"
+        "\n"
+        "# ── Domain → terms ───────────────────────────────────────────────────────────\n"
+        "\n"
+        "DOMAIN_TERMS: dict[str, list[str]] = {\n"
+        + "\n".join(dt_parts)
+        + "\n}\n"
+        "\n"
+        "# ── BudgetKey subject → domains ──────────────────────────────────────────────\n"
+        "\n"
+        "SUBJECT_DOMAIN_MAP: dict[str, list[str]] = {\n"
+        + "\n".join(sm_parts)
+        + "\n}\n"
+        "\n"
+        "# ── Negative patterns (system-wide) ──────────────────────────────────────────\n"
+        "# Tenders whose title contains any of these are rejected regardless of keywords.\n"
+        "\n"
+        "NEGATIVE_PATTERNS: list[str] = [\n"
+        + "\n".join(np_parts)
+        + "\n]\n"
+        "\n"
+        "\n"
+        "def terms_for_domains(domains: list[str]) -> list[str]:\n"
+        '    """Return all taxonomy terms for the given domain list (deduped)."""\n'
+        "    seen: set[str] = set()\n"
+        "    result: list[str] = []\n"
+        "    for domain in domains:\n"
+        "        for term in DOMAIN_TERMS.get(domain, []):\n"
+        "            if term not in seen:\n"
+        "                seen.add(term)\n"
+        "                result.append(term)\n"
+        "    return result\n"
+        "\n"
+        "\n"
+        "def domains_for_subject(subject: str) -> list[str]:\n"
+        '    """Return domains implied by a BudgetKey subject category string."""\n'
+        "    return SUBJECT_DOMAIN_MAP.get(subject.strip(), [])\n"
+    )
+    TAXONOMY_PATH.write_text(content, encoding="utf-8")
+
+
+def _re_evaluate_db() -> dict:
+    """Run re-evaluate directly (no HTTP — same logic as the API endpoint)."""
+    from smarttender.harvest.filter import BasicMetadataFilter
+    from smarttender.harvest.base import RawTenderRecord, TenderStatus as TS
+    from smarttender.schemas.company_profile import CompanyProfile
+
+    db = SessionLocal()
+    try:
+        company_row = db.query(CompanyRow).first()
+        if not company_row:
+            return {"promoted": 0, "evaluated": 0}
+        company = CompanyProfile.model_validate_json(company_row.profile_json)
+        flt = BasicMetadataFilter()
+
+        rejected = db.query(RawTenderRow).filter_by(status=TS.REJECTED.value).all()
+        promoted = 0
+        for row in rejected:
+            import json as _json
+            rec = RawTenderRecord(
+                source_id=row.source_id,
+                external_id=row.external_id,
+                title_he=row.title_he or "",
+                publisher_he=row.publisher_he,
+                subjects=_json.loads(row.subjects_json or "[]"),
+                tender_type=row.tender_type,
+                publication_date=None,
+                deadline=None,
+                estimated_budget_ils=row.estimated_budget_ils,
+                pdf_urls=_json.loads(row.pdf_urls_json or "[]"),
+                page_url=row.page_url,
+                publisher_unit=row.publisher_unit,
+            )
+            if flt.should_analyze(rec, [company]):
+                row.status = TS.PENDING_ANALYSIS.value
+                promoted += 1
+        db.commit()
+        return {"promoted": promoted, "evaluated": len(rejected)}
+    finally:
+        db.close()
+
+
+def apply_suggestions(yes: bool = False) -> None:
+    """Apply data/filter_suggestions.json to taxonomy.py (learning loop)."""
+    # Reload taxonomy fresh (may have been updated since module import)
+    import importlib
+    import smarttender.harvest.taxonomy as _tax_mod
+    importlib.reload(_tax_mod)
+    domain_terms = dict(_tax_mod.DOMAIN_TERMS)
+    subject_map = dict(_tax_mod.SUBJECT_DOMAIN_MAP)
+    negative_patterns = list(_tax_mod.NEGATIVE_PATTERNS)
+
+    suggestions_path = ROOT / "data" / "filter_suggestions.json"
+    if not suggestions_path.exists():
+        print("לא נמצא data/filter_suggestions.json — הרץ --suggest קודם")
+        return
+
+    suggestions = json.loads(suggestions_path.read_text(encoding="utf-8"))
+
+    # Compute truly new additions (dedup case-insensitive)
+    new_terms: dict[str, list[str]] = {}
+    for domain, terms in suggestions.get("taxonomy_additions", {}).items():
+        existing_lower = {t.lower() for t in domain_terms.get(domain, [])}
+        new = [t for t in terms if t.lower() not in existing_lower]
+        if new:
+            new_terms[domain] = new
+
+    new_subjects: dict[str, list[str]] = {}
+    for subj, domains in suggestions.get("new_subject_mappings", {}).items():
+        if subj not in subject_map:
+            new_subjects[subj] = domains
+
+    existing_neg_lower = {n.lower() for n in negative_patterns}
+    new_negatives = [
+        p for p in suggestions.get("new_negative_patterns", [])
+        if p.lower() not in existing_neg_lower
+    ]
+
+    total_new = sum(len(v) for v in new_terms.values()) + len(new_subjects) + len(new_negatives)
+    if total_new == 0:
+        print("אין שינויים חדשים — כל ההצעות כבר קיימות ב-taxonomy.py")
+        return
+
+    # Print diff
+    print("\n=== הצעות חדשות לטקסונומיה ===\n")
+    if new_terms:
+        print("+ מונחים חדשים לתחומים:")
+        for domain, terms in new_terms.items():
+            print(f"  [{domain}] +{len(terms)} מונחים: {terms}")
+    if new_subjects:
+        print("\n+ subject mappings חדשים:")
+        for subj, domains in new_subjects.items():
+            print(f"  '{subj}' -> {domains}")
+    if new_negatives:
+        print(f"\n- negative patterns חדשים (+{len(new_negatives)}):")
+        for p in new_negatives:
+            print(f"  '{p}'")
+
+    print(f"\nסה״כ שינויים חדשים: {total_new}")
+
+    if not yes:
+        try:
+            ans = input("\nהחיל שינויים ל-taxonomy.py? [y/N] ").strip().lower()
+        except EOFError:
+            ans = ""
+        if ans not in ("y", "yes"):
+            print("בוטל.")
+            return
+
+    # Merge
+    for domain, terms in new_terms.items():
+        if domain not in domain_terms:
+            domain_terms[domain] = terms
+        else:
+            domain_terms[domain].extend(terms)
+    subject_map.update(new_subjects)
+    negative_patterns.extend(new_negatives)
+
+    # Write updated taxonomy.py
+    _write_taxonomy(domain_terms, subject_map, negative_patterns)
+    print("\ntaxonomy.py עודכן.")
+
+    # Re-evaluate DB with new taxonomy
+    print("מריץ re-evaluate על מכרזים שנדחו...")
+    # Reload taxonomy so the filter picks up the new file
+    importlib.reload(_tax_mod)
+    import smarttender.harvest.filter as _flt_mod
+    importlib.reload(_flt_mod)
+    result = _re_evaluate_db()
+    print(f"  הוערכו: {result['evaluated']} | קודמו לניתוח: {result['promoted']}")
+
+    print("\nLearning loop הושלם. הרץ --suggest שוב אחרי harvest נוסף.")
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 def run_audit(fp: bool = True, fn: bool = True, suggest: bool = False):
@@ -474,18 +704,25 @@ def run_audit(fp: bool = True, fn: bool = True, suggest: bool = False):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--fp-only", action="store_true")
-    parser.add_argument("--fn-only", action="store_true")
-    parser.add_argument("--suggest", action="store_true")
-    parser.add_argument("--history", action="store_true", help="Show metrics trend")
+    parser = argparse.ArgumentParser(description="Harvest audit + learning loop")
+    parser.add_argument("--fp-only", action="store_true", help="Only check false positives")
+    parser.add_argument("--fn-only", action="store_true", help="Only check false negatives")
+    parser.add_argument("--suggest", action="store_true", help="Generate taxonomy improvement suggestions")
+    parser.add_argument("--apply", action="store_true", help="Apply saved suggestions to taxonomy.py")
+    parser.add_argument("--yes", "-y", action="store_true", help="Auto-approve --apply without prompt")
+    parser.add_argument("--history", action="store_true", help="Show P/R trend across past runs")
     args = parser.parse_args()
 
     if args.history:
         print_history()
+    elif args.apply and not args.fp_only and not args.fn_only and not args.suggest:
+        # --apply only: no LLM needed
+        apply_suggestions(yes=args.yes)
     else:
         run_audit(
             fp=not args.fn_only,
             fn=not args.fp_only,
             suggest=args.suggest,
         )
+        if args.apply:
+            apply_suggestions(yes=args.yes)
