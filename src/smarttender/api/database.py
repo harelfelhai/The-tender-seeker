@@ -103,6 +103,7 @@ class RawTenderRow(Base):
     contract_start = Column(Date, nullable=True)            # expected contract start
     contract_end = Column(Date, nullable=True)              # expected contract end
     status = Column(String, nullable=False, default="discovered", index=True)
+    rejection_reason = Column(String, nullable=True)        # why rejected: "deadline"|"budget"|"type"|"relevance"
     analysis_id = Column(String, nullable=True)             # FK → tenders.id after analysis
     raw_metadata_json = Column(Text, nullable=True)         # full API response
     harvested_at = Column(String, default=lambda: datetime.now(timezone.utc).isoformat())

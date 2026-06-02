@@ -130,7 +130,14 @@ class HarvestService:
             result.duplicates += 1
             return
 
-        status = self._decide_status(rec, companies)
+        filter_result = self._filter.filter_result(rec, companies) if hasattr(self._filter, "filter_result") else None
+        if filter_result is not None:
+            status = TenderStatus.PENDING_ANALYSIS if filter_result.passed else TenderStatus.REJECTED
+            rejection_reason = None if filter_result.passed else filter_result.reason
+        else:
+            status = self._decide_status(rec, companies)
+            rejection_reason = None if status == TenderStatus.PENDING_ANALYSIS else "relevance"
+
         if status == TenderStatus.PENDING_ANALYSIS:
             result.pending_analysis += 1
         else:
@@ -157,6 +164,7 @@ class HarvestService:
             tender_status=rec.tender_status,
             decision=rec.decision,
             status=status.value,
+            rejection_reason=rejection_reason,
             raw_metadata_json=json.dumps(rec.raw_metadata, ensure_ascii=False, default=str),
             harvested_at=datetime.now(timezone.utc).isoformat(),
         )

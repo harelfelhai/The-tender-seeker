@@ -28,11 +28,26 @@ class TenderFilter(Protocol):
     ) -> bool: ...
 
 
+class FilterResult:
+    """Result of a filter decision — pass/reject with reason."""
+    __slots__ = ("passed", "reason")
+
+    def __init__(self, passed: bool, reason: str | None = None):
+        self.passed = passed
+        self.reason = reason  # None when passed; one of: "deadline"|"budget"|"type"|"relevance"
+
+    def __bool__(self) -> bool:
+        return self.passed
+
+
 class BasicMetadataFilter:
     """Rule-based filter using only the fields available from harvest APIs.
 
     A tender passes if it satisfies ALL active rules for at least one company.
     Rules are applied cheaply in order (fast failures first).
+
+    Use should_analyze() for a simple bool, or filter_result() to get the
+    rejection reason (used by HarvestService to persist rejection_reason).
     """
 
     def should_analyze(
@@ -40,14 +55,33 @@ class BasicMetadataFilter:
         raw: RawTenderRecord,
         companies: list[CompanyProfile],
     ) -> bool:
-        return any(self._matches_company(raw, c) for c in companies)
+        return any(self._matches_company(raw, c).passed for c in companies)
 
-    def _matches_company(self, raw: RawTenderRecord, company: CompanyProfile) -> bool:
+    def filter_result(
+        self,
+        raw: RawTenderRecord,
+        companies: list[CompanyProfile],
+    ) -> FilterResult:
+        """Return FilterResult with reason so callers can record WHY it was rejected."""
+        results = [self._matches_company(raw, c) for c in companies]
+        # Pass if any company matches
+        if any(r.passed for r in results):
+            return FilterResult(True)
+        # All rejected — return the least-specific rejection reason
+        # (prefer "relevance" > "deadline" > "budget" > "type" for reporting)
+        reasons = [r.reason for r in results if r.reason]
+        priority = ["relevance", "deadline", "budget", "type"]
+        for p in priority:
+            if p in reasons:
+                return FilterResult(False, p)
+        return FilterResult(False, "relevance")
+
+    def _matches_company(self, raw: RawTenderRecord, company: CompanyProfile) -> FilterResult:
         # 1. Deadline proximity — skip tenders closing too soon
         if raw.deadline is not None and company.min_days_to_deadline > 0:
             days_left = (raw.deadline - date.today()).days
             if days_left < company.min_days_to_deadline:
-                return False
+                return FilterResult(False, "deadline")
 
         # 2. Budget range — skip if clearly outside comfortable project size
         if raw.estimated_budget_ils is not None:
@@ -55,28 +89,28 @@ class BasicMetadataFilter:
                 company.min_project_value_ils is not None
                 and raw.estimated_budget_ils < company.min_project_value_ils * 0.5
             ):
-                return False
+                return FilterResult(False, "budget")
             if (
                 company.max_project_value_ils is not None
                 and raw.estimated_budget_ils > company.max_project_value_ils * 2.0
             ):
-                return False
+                return FilterResult(False, "budget")
 
         # 3. Tender type — skip if company only wants specific types
         if company.preferred_tender_types and raw.tender_type:
             if raw.tender_type not in company.preferred_tender_types:
-                return False
+                return FilterResult(False, "type")
 
         search_text = " ".join(filter(None, [raw.title_he, *raw.subjects])).lower()
 
         # 4. Negative patterns — system-level rejection regardless of keywords
         if any(neg.lower() in search_text for neg in NEGATIVE_PATTERNS):
-            return False
+            return FilterResult(False, "relevance")
 
         # 5. Relevance match — at least one of the following must hit:
         #    a) user-defined harvest_keywords
         #    b) taxonomy terms derived from company domains (system-defined)
-        #    c) BudgetKey subject category mapped to a company domain
+        #    c) BudgetKey subject category mapped to a company domain (+ title corroboration)
         matched = False
 
         if company.harvest_keywords:
@@ -103,9 +137,9 @@ class BasicMetadataFilter:
                         break
 
         if not matched:
-            return False
+            return FilterResult(False, "relevance")
 
-        return True
+        return FilterResult(True)
 
 
 class AcceptAllFilter:

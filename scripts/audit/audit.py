@@ -634,10 +634,23 @@ def run_audit(fp: bool = True, fn: bool = True, suggest: bool = False):
         print(f"\n=== Audit: {company.company_name} | {run_ts} ===\n")
 
         pending = _load_tenders(db, TenderStatus.PENDING_ANALYSIS.value)
-        rejected = _load_tenders(db, TenderStatus.REJECTED.value)
+        rejected_all = _load_tenders(db, TenderStatus.REJECTED.value)
+
+        # Exclude business-rule rejects from FN evaluation.
+        # Tenders rejected for deadline/budget/type reasons were correctly
+        # filtered by business logic — the LLM doesn't know about these
+        # constraints and would label them as "relevant", inflating FN count.
+        rejected_relevance = [
+            r for r in rejected_all
+            if getattr(r, "rejection_reason", None) in (None, "relevance")
+        ]
+        skipped_business = len(rejected_all) - len(rejected_relevance)
+        if skipped_business:
+            print(f"  (skipping {skipped_business} business-rule rejects: deadline/budget/type)")
+
         pending_ids = {r.id for r in pending}
 
-        all_rows = (pending if fp else []) + (rejected if fn else [])
+        all_rows = (pending if fp else []) + (rejected_relevance if fn else [])
         tender_meta = {
             r.id: {"title": r.title_he, "filter_decision": "pending" if r.id in pending_ids else "rejected"}
             for r in all_rows
@@ -649,9 +662,9 @@ def run_audit(fp: bool = True, fn: bool = True, suggest: bool = False):
             print(f"[1] False positives — {len(pending)} עברו פילטר")
             all_llm_labels.update(evaluate_tenders(client, company, pending, cache_label="current_pending"))
 
-        if fn and rejected:
-            print(f"[2] False negatives — {len(rejected)} נדחו")
-            all_llm_labels.update(evaluate_tenders(client, company, rejected, cache_label="current_rejected"))
+        if fn and rejected_relevance:
+            print(f"[2] False negatives — {len(rejected_relevance)} נדחו (relevance only)")
+            all_llm_labels.update(evaluate_tenders(client, company, rejected_relevance, cache_label="current_rejected"))
 
         # ── Classify results ──────────────────────────────────────────────────
         false_positives = [
