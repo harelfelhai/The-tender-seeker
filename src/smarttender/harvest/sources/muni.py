@@ -37,10 +37,12 @@ class MuniTendersSource:
 
         since_date = since.date() if since else date(2020, 1, 1)
         query = (
-            "SELECT tender_id, tender_type, description, publisher, publisher_unit, "
-            "page_url, publication_date, last_update_date, claim_date, status "
+            "SELECT tender_id, tender_type, tender_type_he, description, "
+            "publisher, publisher_unit, page_url, status, decision, "
+            "publication_date, last_update_date, claim_date "
             f"FROM muni_tenders "
             f"WHERE (last_update_date > '{since_date}' OR publication_date > '{since_date}') "
+            f"AND status IN ('פתוח', 'פעיל') "
             f"ORDER BY last_update_date DESC NULLS LAST "
             f"LIMIT {self._page_size}"
         )
@@ -63,11 +65,14 @@ class MuniTendersSource:
             publisher_unit=row.get("publisher_unit"),
             subjects=[],
             tender_type=row.get("tender_type"),
+            tender_type_he=row.get("tender_type_he"),
             publication_date=_parse_date(row.get("publication_date") or row.get("last_update_date")),
             deadline=_parse_date(row.get("claim_date")),
             estimated_budget_ils=None,
             pdf_urls=[],
             page_url=row.get("page_url"),
+            tender_status=row.get("status"),
+            decision=row.get("decision"),
             raw_metadata=row,
         )
 

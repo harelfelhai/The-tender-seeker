@@ -97,6 +97,11 @@ class RawTenderRow(Base):
     uploaded_by = Column(String, nullable=True, index=True) # company_id (manual uploads)
     page_url = Column(String, nullable=True)                # direct link to tender page
     publisher_unit = Column(String, nullable=True)          # sub-unit within publisher
+    tender_status = Column(String, nullable=True)           # source status (פורסם / סגור …)
+    decision = Column(String, nullable=True)                # committee decision
+    tender_type_he = Column(String, nullable=True)          # Hebrew label for tender type
+    contract_start = Column(Date, nullable=True)            # expected contract start
+    contract_end = Column(Date, nullable=True)              # expected contract end
     status = Column(String, nullable=False, default="discovered", index=True)
     analysis_id = Column(String, nullable=True)             # FK → tenders.id after analysis
     raw_metadata_json = Column(Text, nullable=True)         # full API response

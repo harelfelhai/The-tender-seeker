@@ -1,229 +1,138 @@
 {
-  "run_ts": "2026-06-02T09-03-38",
+  "run_ts": "2026-06-02T09-57-11",
   "company": "עתיד מיזוג אוויר בע\"מ",
   "metrics": {
-    "tp": 7,
-    "fp": 26,
-    "fn": 4,
-    "tn": 963,
-    "precision": 0.212,
-    "recall": 0.636,
-    "f1": 0.318,
-    "llm_relevant_total": 11,
-    "filter_passed_total": 33
+    "tp": 8,
+    "fp": 3,
+    "fn": 14,
+    "tn": 975,
+    "precision": 0.727,
+    "recall": 0.364,
+    "f1": 0.485,
+    "llm_relevant_total": 22,
+    "filter_passed_total": 11
   },
   "false_positives": [
     {
-      "title": "גרין אפל בע\"מ - השלמת 5 דלתות הדף משולבות דלתות אש במתחמי טיפול ואשפוז בחירום",
+      "title": "תעשיות בית אל זכרון יעקב בעמ - בדיקת שנתית למערכות סינון אב\"כ",
       "filter_decision": "pending",
       "relevant": false,
       "confidence": "high",
-      "reason_he": "דלתות אש - לא קשור למיזוג אוויר או קירור"
+      "reason_he": "בדיקת מערכות סינון אב\"כ (פינוי עשן) - לא ברור שזה בתחום ליבה של החברה, בדיקות בלבד ללא התקנה/תיקון"
     },
     {
-      "title": "תחזוקת מערכת לניהול, קבלה ושליחת פקסים מתוצרת OPEN TEXT",
+      "title": "תחזוקה, שירות, חלפים, ביקורות לפי דרישות כבאות למערכת גילוי וכיבוי אש המותקנות ברחבי המרכז הרפואי",
       "filter_decision": "pending",
       "relevant": false,
       "confidence": "high",
-      "reason_he": "תחזוקת מערכת פקסים תוכנה - לא קשור ל-HVAC"
-    },
-    {
-      "title": "PAT המרכז לטכנולוגיות אוויר דחוס - אחזקה ושירות תקופתי למדחסי אוויר רפואי ומייבשות ספיחה",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "אוויר רפואי ומייבשות - לא קשור למיזוג אוויר"
-    },
-    {
-      "title": "הזמנת מסגרת   תיקונים על פי צורך",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "תיקונים כלליים - לא מציין HVAC"
-    },
-    {
-      "title": "שירות עבור מערכות בקרה ברחבי ביה\"ח שיבא",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "medium",
-      "reason_he": "מערכות בקרה כלליות - לא ברור שקשור ל-HVAC, תקציב 3 מיליון בטווח"
-    },
-    {
-      "title": "מכרז פומבי  20/2025 - לרכישת שירותי ממונה כשירות אווירית נמשכת למערך מטוס ראשי המדינה",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "ממונה כשירות אווירית למטוס - לא קשור למיזוג אוויר בנייני"
-    },
-    {
-      "title": "תחזוקת מערכות ספרינקלרים רטובה ויבשה",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "ספרינקלרים - מערכות כיבוי אש, לא HVAC"
-    },
-    {
-      "title": "שיפוץ נציגות ישראל בפיג'י  - אגף משאב\"ח",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "שיפוץ בנייה כללי בחו\"ל - לא קשור ל-HVAC"
-    },
-    {
-      "title": "מתן שירותי בקרה בתחום הפיקוח",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "שירותי בקרה בפיקוח - לא ברור שקשור ל-HVAC"
+      "reason_he": "מערכות גילוי וכיבוי אש - בטיחות אש, לא קשור למיזוג אויר או קירור"
     },
     {
       "title": "תעשיות בית אל זכרון יעקב בעמ - בדיקת שנתית למערכות סינון אב\"כ",
       "filter_decision": "pending",
       "relevant": false,
-      "confidence": "medium",
-      "reason_he": "בדיקת שנתית למערכות סינון - לא ברור שקשור למיזוג או קירור"
-    },
-    {
-      "title": "טוטנאוור בע\"מ - אספקת שירות ותחזוקה לאוטוקלאבים ומכונה לשטיפת ציוד רפואי",
-      "filter_decision": "pending",
-      "relevant": false,
       "confidence": "high",
-      "reason_he": "אוטוקלאבים ומכונות שטיפה רפואית - לא קשור ל-HVAC"
-    },
-    {
-      "title": "מימוש אופציה לרכש ממ\"מ",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "low",
-      "reason_he": "רכש ממ\"מ - מידע חסר, לא ברור התוכן"
-    },
-    {
-      "title": "מכרז לתחזוקת מכונות כולל אספקת חלקי חילוף עבור מכונות דפוס אופסט ומכונות קיפול תוצרת היידלברג ומהפך משטחים",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "תחזוקת מכונות דפוס - לא קשור ל-HVAC"
-    },
-    {
-      "title": "עבודות אחזקה עבור מערכות הכלרה למים חמים",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "אינסטלציה למים חמים - לא קשור למיזוג או קירור"
-    },
-    {
-      "title": "החלפת משאבות חום לייצור מים חמים",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "משאבות חום לחימום - לא במטרה של מיזוג אוויר"
-    },
-    {
-      "title": "שירותי תחזוקה תפעול וניהול לרבות ניקיון גינון והדברה במתקני משטרה באזורים דרום ש\"י צפון וחוף",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "תחזוקה כללית ניקיון גינון - לא מציין HVAC"
-    },
-    {
-      "title": "אישור התקשרות עם חברת אלבר ציי רכב (ר.צ.) בע\"מ לטובת צריכת חשמל במתקן אלבר",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "צריכת חשמל כללית - לא קשור ישירות למיזוג אויר או קירור"
-    },
-    {
-      "title": "אישור תקציב המינהלה עם חלי לשנת 2026",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "אישור תקציב מינהלה - לא מכרז עבודה או שירותים ספציפיים"
-    },
-    {
-      "title": "מכרז פומבי מספר  04/2026 עבודות בינוי ושיפוץ טיפול נמרץ ילדים  במרכז הרפואי הלל יפה",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "בנייה ושיפוץ כללי ללא התייחסות ספציפית ל-HVAC"
-    },
-    {
-      "title": "תעשיות בית אל זכרון יעקב בעמ - בדיקת שנתית למערכות סינון אב\"כ",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "medium",
-      "reason_he": "בדיקת שנתית למערכות סינון אב\"כ - קשור לאוורור אך יתכן שזה אישור לחברה ספציפית"
-    },
-    {
-      "title": "טוטנאוור בע\"מ - אספקת שירות ותחזוקה לאוטוקלאבים ומכונה לשטיפת ציוד רפואי",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "אספקת שירות לאוטוקלאבים ומכונות שטיפה - לא קשור למיזוג אויר"
-    },
-    {
-      "title": "הארכת התקשרות ללא עלות נוספת עם מ.א אל קסום ומ.מ עאבלין - תחנות לבריאות המפשחה",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "low",
-      "reason_he": "הארכת התקשרות ללא עלות - מידע חסר על הטבע הספציפי של השירות"
-    },
-    {
-      "title": "מכרז פומבי מספר 02/2026 עבודות בינוי ושיפוץ מכון שמיעה  במרכז הרפואי הלל יפה",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "בנייה ושיפוץ כללי ללא התייחסות ספציפית ל-HVAC"
-    },
-    {
-      "title": "אישור בחירת יועץ ב.ג. בקרה וניהול פרויקטים ליעוץ הנדסי וליווי פרויקטים - המעבדות לבריאות הציבור תל אביב",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "יעוץ הנדסי וניהול פרויקטים - לא קשור ישירות לביצוע שירותי HVAC"
-    },
-    {
-      "title": "מכרז 1/26 הקמת מלר\"ד ממוגן - שלב א' - המרכז הרפואי שמיר (אסף הרופא)",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "בנייה כללית של מלר\"ד - לא קשור ישירות למיזוג אויר"
-    },
-    {
-      "title": "משלוח חומר ביולוגי עבור משרד החקלאות וביטחון המזון",
-      "filter_decision": "pending",
-      "relevant": false,
-      "confidence": "high",
-      "reason_he": "משלוח חומר ביולוגי בקירור - שירות הובלה בקירור, לא מיזוג או אוורור"
+      "reason_he": "בדיקת מערכות סינון אב\"כ - לא ברור שזה בתחום ליבה של החברה, בדיקות בלבד ללא התקנה/תיקון"
     }
   ],
   "false_negatives": [
     {
-      "title": "תחזוקת מע' סימפוני ומערכת מכון מירב",
+      "title": "מבנים ומוסדות ציבור",
       "filter_decision": "rejected",
       "relevant": true,
       "confidence": "medium",
-      "reason_he": "תחזוקת מערכות (סימפוני ומכון) - עשוי לכלול HVAC אך אינו ברור לחלוטין"
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש שירותי מיזוג אויר וקירור, אך תקציב לא ידוע ודוגיות משתנות"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש שירותי HVAC, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים להכיל מערכות מיזוג אויר וקירור, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש שירותי HVAC, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים להכיל מערכות קירור ומיזוג אויר, אך תקציב לא ידוע"
+    },
+    {
+      "title": "מבנים ומוסדות ציבור",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "מבנים ומוסדות ציבור עשויים לדרוש מערכות HVAC, אך תקציב לא ידוע"
+    },
+    {
+      "title": "חוזה שירות לטיפול במים במערכת CQM",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "חוזה שירות למערכת CQM בבית חולים - עשוי להיות קשור לתחזוקת מערכות מכניות/אוורור"
+    },
+    {
+      "title": "תחזוקת מערכות ספרינקלרים רטובה ויבשה",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "תחזוקת מערכות ספרינקלרים - מערכות מכניות בבניין חשוב, קרוב לתחום HVAC"
     },
     {
       "title": "תחזוקת מערכות אויר רפואי",
       "filter_decision": "rejected",
       "relevant": true,
       "confidence": "high",
-      "reason_he": "תחזוקת מערכות אויר רפואי - קשור ישירות לתחזוקת מערכות אויר, תקציב 123,900₪ בתחום"
+      "reason_he": "תחזוקת מערכות אויר רפואי - קשור ישירות לתחום אוורור וקירור, בתחום תקציב"
     },
     {
       "title": "הגשת בקשות לסיוע בגיבוש תכנית פעולה למעבר לאנרגיה מקיימת ברשויות מקומיות (\"המאיץ\") מחזור מס' 4",
       "filter_decision": "rejected",
       "relevant": true,
       "confidence": "high",
-      "reason_he": "תכנית אנרגיה מקיימת, כולל מיזוג אוויר בנושאי הקצבה וייעול חסכוני ברשויות מקומיות באזור התפוצה של החברה"
+      "reason_he": "כלול 'מיזוג אוויר' בתוך רשימת הנושאים הנרחבת, אנרגיה מקיימת רלוונטית"
+    },
+    {
+      "title": "עבודות אחזקה עבור מערכות הכלרה למים חמים",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "עבודות אחזקה למערכות כלרה למים חמים - קשור לאינסטלציה ותחזוקת מערכות מכניות, הייתכן שקשור למערכות חום וקירור"
+    },
+    {
+      "title": "שירותי תחזוקה תפעול וניהול לרבות ניקיון גינון והדברה במתקני משטרה באזורים דרום ש\"י צפון וחוף",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "high",
+      "reason_he": "שירותי תחזוקה וניהול במתקני משטרה כולל הדברה - עשוי לכלול תחזוקת מערכות מכניות ופינוי עשן"
+    },
+    {
+      "title": "התקשרות עם חברת אור רויאל כספק יחיד לקבלת שירותי משרד בבית אהרון",
+      "filter_decision": "rejected",
+      "relevant": true,
+      "confidence": "medium",
+      "reason_he": "שירותי משרד ותחזוקה בבנין - עשוי לכלול שירותי אחזוקה של מערכות מכניות כולל מיזוג אויר"
     },
     {
       "title": "שירות למערכת סינון אויר",
       "filter_decision": "rejected",
       "relevant": true,
       "confidence": "high",
-      "reason_he": "שירות למערכת סינון אויר - קשור ישירות לאוורור וטיהור אויר, בתקציב התאים (140,001₪)"
+      "reason_he": "שירות סינון אויר - קשור ישירות לאוורור וסינון אויר, תחום עיסוקי של החברה"
     }
   ]
 }

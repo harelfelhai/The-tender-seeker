@@ -41,6 +41,11 @@ class RawTenderRecord:
     uploaded_by: Optional[str] = None       # company_id — manual uploads only
     page_url: Optional[str] = None          # direct link to tender page
     publisher_unit: Optional[str] = None    # sub-unit within the publisher
+    tender_status: Optional[str] = None     # source status (פורסם / פתוח / סגור …)
+    decision: Optional[str] = None          # committee decision
+    tender_type_he: Optional[str] = None    # Hebrew label for tender type
+    contract_start: Optional[date] = None   # expected contract start date
+    contract_end: Optional[date] = None     # expected contract end date
     raw_metadata: dict = field(default_factory=dict)
 
 

@@ -1,11 +1,15 @@
 """BudgetKey harvest source — free Israeli government procurement data.
 
-API: https://next.obudget.org/api/query (no auth, SQL over ~191k tender records)
+API: https://next.obudget.org/api/query (no auth, SQL over ~228k tender records)
 Schema reference: github.com/OpenBudget/budgetkey-data-pipelines
 
-Metadata available without PDF download:
-  description, publisher, subjects, tender_type, publication_date,
-  claim_date (deadline), volume (estimated budget), documents (PDF links)
+Metadata fetched:
+  description, publisher, publisher_unit, subjects, tender_type, tender_type_he,
+  publication_date, claim_date (deadline), start_date, end_date (contract period),
+  volume (estimated budget), documents (PDF links), page_url, status, decision
+
+Only ACTIVE statuses are fetched (פורסם, בעדכון, עתידי, etc.) — closed/cancelled
+tenders are excluded to avoid indexing irrelevant historical data.
 """
 from __future__ import annotations
 
@@ -59,15 +63,28 @@ class BudgetKeySource:
         log.info("BudgetKey returned %d rows since %s", len(rows), since_date)
         return [self._to_record(row) for row in rows]
 
+    # Statuses representing active open tenders — exclude closed/cancelled.
+    ACTIVE_STATUSES = (
+        "פורסם",
+        "פורסם ולא התקבלו השגות",
+        "פורסם והתקבלו השגות",
+        "בעדכון",
+        "עתידי",
+        "חדש",
+    )
+
     # ── overridable ────────────────────────────────────────────────────────────
 
     def _build_query(self, since: date) -> str:
+        status_list = ", ".join(f"'{s}'" for s in self.ACTIVE_STATUSES)
         return (
-            "SELECT publication_id, tender_id, tender_type, description, "
-            "publisher, publisher_unit, page_url, "
-            "publication_date, last_update_date, claim_date, volume, subjects, documents "
+            "SELECT publication_id, tender_id, tender_type, tender_type_he, description, "
+            "publisher, publisher_unit, page_url, status, decision, "
+            "publication_date, last_update_date, claim_date, start_date, end_date, "
+            "volume, subjects, documents "
             f"FROM procurement_tenders_all "
             f"WHERE last_update_date > '{since}' "
+            f"AND status IN ({status_list}) "
             f"ORDER BY last_update_date DESC "
             f"LIMIT {self._page_size}"
         )
@@ -83,11 +100,16 @@ class BudgetKeySource:
             publisher_unit=row.get("publisher_unit"),
             subjects=_parse_subjects(row.get("subjects")),
             tender_type=row.get("tender_type"),
+            tender_type_he=row.get("tender_type_he"),
             publication_date=_parse_date(row.get("publication_date") or row.get("last_update_date")),
             deadline=_parse_date(row.get("claim_date")),
+            contract_start=_parse_date(row.get("start_date")),
+            contract_end=_parse_date(row.get("end_date")),
             estimated_budget_ils=_safe_float(row.get("volume")),
             pdf_urls=_parse_pdf_urls(row.get("documents")),
             page_url=row.get("page_url"),
+            tender_status=row.get("status"),
+            decision=row.get("decision"),
             raw_metadata=row,
         )
 
