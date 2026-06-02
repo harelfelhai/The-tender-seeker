@@ -22,7 +22,8 @@ from ..base import RawTenderRecord
 log = logging.getLogger(__name__)
 
 _API_URL = "https://next.obudget.org/api/query"
-_PAGE_SIZE = 5000
+# BudgetKey API returns at most 1000 rows per request regardless of LIMIT.
+_PAGE_SIZE = 1000
 
 # All tender types available in BudgetKey
 TENDER_TYPES = ("office", "central", "exemptions")
@@ -40,28 +41,79 @@ class BudgetKeySource:
     def __init__(self, page_size: int = _PAGE_SIZE) -> None:
         self._page_size = page_size
 
+    # Max concurrent requests — BudgetKey is a free public API, be polite.
+    _CONCURRENCY = 5
+
     async def fetch_new(
         self,
         since: Optional[datetime] = None,
     ) -> list[RawTenderRecord]:
+        """Fetch all active tenders, with paginated parallel requests.
+
+        BudgetKey caps responses at 1000 rows regardless of LIMIT.  We probe
+        the first page to discover total row count, then fetch all remaining
+        pages in parallel (up to _CONCURRENCY at a time).
+
+        since=None → full backfill (all active tenders, ~200K rows, ~2 min)
+        since=datetime → delta (only rows updated after that date, much faster)
+        """
         try:
+            import asyncio
             import httpx
         except ImportError as exc:
             raise RuntimeError(
                 "httpx is required for BudgetKeySource: pip install httpx"
             ) from exc
 
-        since_date = since.date() if since else date(2020, 1, 1)
-        query = self._build_query(since_date)
+        since_date = since.date() if since else None
 
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(_API_URL, params={"query": query})
-            resp.raise_for_status()
-            data = resp.json()
+        async with httpx.AsyncClient(timeout=60) as client:
+            # Probe page 0 to get actual count and first batch
+            first_page = await self._fetch_page(client, since_date, offset=0)
+            if len(first_page) < self._page_size:
+                log.info("BudgetKey: %d rows (single page)", len(first_page))
+                return [self._to_record(r) for r in first_page]
 
-        rows = data.get("rows", [])
-        log.info("BudgetKey returned %d rows since %s", len(rows), since_date)
-        return [self._to_record(row) for row in rows]
+            # Estimate remaining pages from count query
+            total = await self._fetch_count(client, since_date)
+            offsets = list(range(self._page_size, total + self._page_size, self._page_size))
+            log.info("BudgetKey: ~%d total rows, fetching %d more pages", total, len(offsets))
+
+            semaphore = asyncio.Semaphore(self._CONCURRENCY)
+
+            async def fetch_with_sem(offset: int) -> list[dict]:
+                async with semaphore:
+                    return await self._fetch_page(client, since_date, offset)
+
+            remaining = await asyncio.gather(*[fetch_with_sem(o) for o in offsets])
+
+        all_rows = first_page + [row for page in remaining for row in page]
+        log.info("BudgetKey fetched %d total rows", len(all_rows))
+        return [self._to_record(row) for row in all_rows]
+
+    async def _fetch_page(
+        self,
+        client,
+        since_date: Optional[date],
+        offset: int,
+    ) -> list[dict]:
+        query = self._build_query(since_date, offset=offset)
+        resp = await client.get(_API_URL, params={"query": query})
+        resp.raise_for_status()
+        page = resp.json().get("rows", [])
+        log.debug("BudgetKey offset=%d → %d rows", offset, len(page))
+        return page
+
+    async def _fetch_count(self, client, since_date: Optional[date]) -> int:
+        status_list = ", ".join(f"'{s}'" for s in self.ACTIVE_STATUSES)
+        date_clause = f"AND last_update_date > '{since_date}' " if since_date else ""
+        query = (
+            f"SELECT COUNT(*) as cnt FROM procurement_tenders_all "
+            f"WHERE status IN ({status_list}) {date_clause}"
+        )
+        resp = await client.get(_API_URL, params={"query": query})
+        resp.raise_for_status()
+        return int(resp.json()["rows"][0]["cnt"])
 
     # Statuses representing active open tenders — exclude closed/cancelled.
     ACTIVE_STATUSES = (
@@ -75,18 +127,19 @@ class BudgetKeySource:
 
     # ── overridable ────────────────────────────────────────────────────────────
 
-    def _build_query(self, since: date) -> str:
+    def _build_query(self, since: Optional[date], offset: int = 0) -> str:
         status_list = ", ".join(f"'{s}'" for s in self.ACTIVE_STATUSES)
+        date_clause = f"AND last_update_date > '{since}' " if since else ""
         return (
             "SELECT publication_id, tender_id, tender_type, tender_type_he, description, "
             "publisher, publisher_unit, page_url, status, decision, "
             "publication_date, last_update_date, claim_date, start_date, end_date, "
             "volume, subjects, documents "
             f"FROM procurement_tenders_all "
-            f"WHERE last_update_date > '{since}' "
-            f"AND status IN ({status_list}) "
+            f"WHERE status IN ({status_list}) "
+            f"{date_clause}"
             f"ORDER BY last_update_date DESC "
-            f"LIMIT {self._page_size}"
+            f"LIMIT {self._page_size} OFFSET {offset}"
         )
 
     # ── helpers ────────────────────────────────────────────────────────────────
